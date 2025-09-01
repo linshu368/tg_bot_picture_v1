@@ -1,4 +1,3 @@
-cat > scripts/snapshot.sh <<'EOF'
 #!/usr/bin/env bash
 set -e
 
@@ -16,6 +15,3 @@ git tag "${TAG}"
 git push origin "${TAG}"
 
 echo "✅ snapshot created & pushed: ${TAG}"
-EOF
-
-chmod +x scripts/snapshot.sh
