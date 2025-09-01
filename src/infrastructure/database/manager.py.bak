@@ -1,0 +1,270 @@
+"""
+数据库管理器 - 重构版
+负责数据库连接管理和基础操作
+"""
+
+import logging
+import aiosqlite
+from typing import Optional
+from datetime import datetime, timezone, timedelta
+
+from src.utils.config.settings import DatabaseSettings
+
+
+class DatabaseManager:
+    """异步数据库管理器"""
+    
+    def __init__(self, settings: DatabaseSettings):
+        self.settings = settings
+        self.logger = logging.getLogger(__name__)
+        self._connection: Optional[aiosqlite.Connection] = None
+        
+    async def initialize(self):
+        """初始化数据库连接和表结构"""
+        try:
+            self.logger.info(f"初始化数据库: {self.settings.path}")
+            
+            # 确保数据目录存在
+            import os
+            os.makedirs(os.path.dirname(self.settings.path), exist_ok=True)
+            
+            # 创建数据库连接
+            self._connection = await aiosqlite.connect(self.settings.path)
+            
+            # 创建表结构
+            await self._create_tables()
+            
+            self.logger.info("数据库初始化完成")
+            
+        except Exception as e:
+            self.logger.error(f"数据库初始化失败: {e}")
+            raise
+    
+    async def close(self):
+        """关闭数据库连接"""
+        if self._connection:
+            await self._connection.close()
+            self.logger.info("数据库连接已关闭")
+    
+    async def get_connection(self) -> aiosqlite.Connection:
+        """获取数据库连接"""
+        if not self._connection:
+            await self.initialize()
+        return self._connection
+    
+    def get_beijing_time(self, dt: datetime = None) -> datetime:
+        """获取北京时间"""
+        if dt is None:
+            dt = datetime.utcnow()
+        beijing_time = dt.replace(tzinfo=timezone.utc).astimezone(
+            timezone(timedelta(hours=8))
+        )
+        return beijing_time
+    
+    async def _create_tables(self):
+        """创建数据库表结构"""
+        conn = await self.get_connection()
+        
+        # 用户表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE NOT NULL,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                uid TEXT UNIQUE NOT NULL,
+                points INTEGER DEFAULT 50,
+                level INTEGER DEFAULT 1,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                session_count INTEGER DEFAULT 0,
+                total_points_spent INTEGER DEFAULT 0,
+                total_paid_amount REAL DEFAULT 0.0,
+                first_add BOOLEAN DEFAULT 0,
+                utm_source TEXT DEFAULT '000',
+                first_active_time TIMESTAMP,
+                last_active_time TIMESTAMP,
+                total_messages_sent INTEGER DEFAULT 0
+            )
+        """)
+        
+        # 积分记录表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS point_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                points_change INTEGER NOT NULL,
+                action_type TEXT NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                points_balance INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 每日签到记录表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_checkins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                checkin_date DATE NOT NULL,
+                points_earned INTEGER DEFAULT 10,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, checkin_date),
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 图像生成任务表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS image_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                credits_cost INTEGER NOT NULL,
+                params TEXT,
+                result_path TEXT,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 视频生成任务表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS video_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                credits_cost INTEGER NOT NULL,
+                model_name TEXT,
+                result_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 人脸交换任务表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS faceswap_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                credits_cost INTEGER NOT NULL,
+                type_gen TEXT NOT NULL,
+                result_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 自定义脱衣任务表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS custom_undress_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                credits_cost INTEGER NOT NULL,
+                cloth TEXT,
+                pose TEXT,
+                params TEXT,
+                result_path TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 创建支付订单表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS payment_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                order_no TEXT UNIQUE NOT NULL,
+                package_id TEXT NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                credits INTEGER NOT NULL,
+                payment_method TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                trade_no TEXT,
+                expired_at TIMESTAMP,
+                paid_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 用户偏好表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                body_type TEXT DEFAULT 'normal',
+                breast_size TEXT DEFAULT 'normal',
+                butt_size TEXT DEFAULT 'normal',
+                age TEXT DEFAULT '25',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+        
+        # 系统配置表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                config_key TEXT UNIQUE NOT NULL,
+                config_value TEXT NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 会话记录表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                started_at TIMESTAMP NOT NULL,
+                ended_at TIMESTAMP,
+                message_count_user INTEGER DEFAULT 0,
+                duration_sec INTEGER,
+                summary TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        
+        # 用户行为记录表
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_action_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                action_time TIMESTAMP NOT NULL,
+                parameters TEXT,
+                message_context TEXT,
+                status TEXT DEFAULT 'success',
+                points_cost INTEGER DEFAULT 0,
+                result_url TEXT,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        
+        await conn.commit()
+        self.logger.info("数据库表结构创建完成") 
