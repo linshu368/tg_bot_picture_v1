@@ -1,40 +1,58 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 show_help() {
   echo "用法:"
-  echo "  rollback.sh [tag]      回滚到指定 tag"
-  echo "  rollback.sh            回滚到最新 tag"
-  echo "  rollback.sh --list     列出最近 5 个 tag"
+  echo "  rollback.sh --list-tag          列出最近 5 个 tag"
+  echo "  rollback.sh --list-commit TAG   列出某 tag 下最近的 commit"
+  echo "  rollback.sh <commit_sha|tag>    回滚 main 到指定 commit 或 tag (会强推远程)"
   exit 0
 }
 
-# 如果传入 --list
-if [ "$1" = "--list" ]; then
+# 列出最近 5 个 tag
+if [ "${1:-}" = "--list-tag" ]; then
   echo "📌 最近 5 个 tag:"
   git tag --sort=-creatordate | head -n 5
   exit 0
 fi
 
-# 如果传入 tag，则使用该 tag，否则取最新
-TARGET_TAG=${1:-$(git tag --sort=-creatordate | head -n 1)}
-
-if [ -z "$TARGET_TAG" ]; then
-  echo "❌ 未找到任何 tag"
-  exit 1
+# 列出某个 tag 下的 commit
+if [ "${1:-}" = "--list-commit" ]; then
+  TAG=${2:-}
+  if [ -z "$TAG" ]; then
+    echo "❌ 缺少 tag 名称"
+    exit 1
+  fi
+  echo "🔎 ${TAG} 下的最近 5 个 commit:"
+  git log "$TAG" --oneline -n 5
+  exit 0
 fi
 
-echo "↩️  checkout to ${TARGET_TAG}"
-git checkout "${TARGET_TAG}"
+# 如果没有参数，提示帮助
+if [ $# -lt 1 ]; then
+  show_help
+fi
 
-echo "ℹ️  现在处于 detached HEAD 状态 (tag: ${TARGET_TAG})"
-echo "   - 你不在任何分支上，只是指向该快照"
-echo "   - commit 会生成悬空提交，不要直接开发"
-echo "   - 如果要基于此版本开发，请新建分支:"
-echo "       git switch -c hotfix/from-${TARGET_TAG}"
-echo "   - 开发完成后再合并回 main"
-echo ""
-echo "ℹ️  验证应用可运行:"
-echo "       sh scripts/run.sh"
-echo "ℹ️  恢复到开发分支:"
-echo "       git checkout main"
+TARGET=$1
+
+# 确认 main 在最新状态
+git fetch origin main
+git checkout main
+git pull origin main
+
+# 创建备份 tag
+BACKUP_TAG="backup-before-rollback-$(date +%F_%H%M%S)"
+git tag "$BACKUP_TAG"
+git push origin "$BACKUP_TAG"
+echo "✅ 已创建备份 tag: $BACKUP_TAG"
+
+# 回退 main 到目标 commit/tag
+echo "↩️  回滚 main 到 $TARGET ..."
+git reset --hard "$TARGET"
+
+# 强推远程
+git push origin main -f
+
+echo "✅ main 已成功回滚到 $TARGET"
+echo "ℹ️  如果要恢复，可以 checkout 或 reset 到备份 tag:"
+echo "       git checkout $BACKUP_TAG"
