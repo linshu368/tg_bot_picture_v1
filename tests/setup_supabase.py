@@ -140,7 +140,7 @@ async def test_basic_operations():
         except Exception as e:
             if "does not exist" in str(e).lower():
                 logger.warning("⚠️  users表不存在，请先在Supabase控制台创建表结构")
-                logger.info("请在Supabase控制台的SQL编辑器中执行scripts/supabase_tables.sql文件中的所有SQL语句")
+                logger.info("请在Supabase控制台的SQL编辑器中执行scripts/db/supabase_tables.sql文件中的所有SQL语句")
                 await create_tables_in_supabase()
             else:
                 raise
@@ -164,8 +164,8 @@ async def main():
         logger.info("✅ Supabase配置成功！")
         logger.info("您现在可以：")
         logger.info("1. 在Supabase控制台创建必要的表结构（如果还没有的话）")
-        logger.info("   - 执行 scripts/supabase_tables.sql 中的SQL语句")
-        logger.info("2. 运行 python scripts/test_supabase.py 进行完整测试")
+        logger.info("   - 执行 scripts/db/supabase_tables.sql 中的SQL语句")
+        logger.info("2. 运行 python tests/test_supabase.py 进行完整测试")
         logger.info("3. 如果有SQLite数据，运行 python scripts/migrate_to_supabase.py 迁移数据")
         logger.info("4. 配置其他环境变量（Bot Token等）后启动应用")
         logger.info("="*60)

@@ -29,15 +29,24 @@ pm2 --version
 ## 🛠️ 配置文件说明
 
 ### `ecosystem.config.js`
-这是 PM2 的主配置文件，包含以下关键配置：
+这是 PM2 的主配置文件，当前使用的关键配置：
 
 - **name**: 应用名称 `tg-bot-picture`
-- **script**: 启动脚本 `python3`
-- **args**: 启动参数 `main.py`
-- **instances**: 实例数量 (设为1，因为bot不需要多实例)
-- **autorestart**: 自动重启 (进程崩溃时自动重启)
-- **max_memory_restart**: 内存限制重启 (1GB)
-- **log_file**: 日志文件路径
+- **script**: 入口脚本 `main.py`
+- **interpreter**: Python 解释器 `/home/tg_bot_picture_v1/venv/bin/python3`（已锁定到项目 venv）
+- **cwd**: 工作目录 `/home/tg_bot_picture_v1`
+- **instances**: `1`（单实例，避免端口冲突）
+- **exec_mode**: `fork`
+- **autorestart**: `true`
+- **max_memory_restart**: `1G`
+- **out_file**: `/home/tg_bot_picture_v1/logs/pm2-out.log`
+- **error_file**: `/home/tg_bot_picture_v1/logs/pm2-error.log`
+- **merge_logs**: `true`
+- **time**: `true`
+- **log_date_format**: `YYYY-MM-DD HH:mm:ss Z`
+- **restart_delay**: `4000`
+- **kill_timeout**: `3000`
+- **env**: 环境变量（默认包含 `PYTHONUNBUFFERED: '1'`，可按需增加如 `BOT_TOKEN` 等）
 
 ## 🎮 使用方法
 
@@ -111,6 +120,7 @@ pm2 monit
 ```
 
 ### 日志管理
+PM2 日志路径：`/home/tg_bot_picture_v1/logs/pm2-out.log`（标准输出）与 `/home/tg_bot_picture_v1/logs/pm2-error.log`（错误输出）
 ```bash
 # 查看实时日志
 pm2 logs tg-bot-picture
@@ -149,11 +159,11 @@ pm2 unstartup
 ```
 
 ### 环境变量管理
-在 `ecosystem.config.js` 中可以设置环境变量：
+在 `ecosystem.config.js` 的 `env` 字段中设置环境变量，例如：
 
 ```javascript
 env: {
-  NODE_ENV: 'production',
+  PYTHONUNBUFFERED: '1',
   BOT_TOKEN: 'your_bot_token',
   // 其他环境变量...
 }

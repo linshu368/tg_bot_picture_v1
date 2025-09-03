@@ -3,6 +3,9 @@
 重构后的Telegram Bot主启动文件
 """
 
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(usecwd=True), override=False)
+
 import asyncio
 import logging
 import signal

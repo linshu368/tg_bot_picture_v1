@@ -2,31 +2,26 @@ module.exports = {
   apps: [
     {
       name: 'tg-bot-picture',
-      script: 'python3',
-      args: 'main.py',
-      cwd: '/home/tg_bot_picture_v1',
-      instances: 1,
+      script: 'main.py',                                 // 直接运行入口文件
+      interpreter: '/home/tg_bot_picture_v1/venv/bin/python3', // 固定到同一 venv
+      cwd: '/home/tg_bot_picture_v1',                    // 项目根目录（.env 在这）
+      instances: 1,                                      // 单实例，避免端口冲突
+      exec_mode: 'fork',
       autorestart: true,
       watch: false,
       max_memory_restart: '1G',
       env: {
-        NODE_ENV: 'production'
+        PYTHONUNBUFFERED: '1'                            // 立刻刷日志
+        // 如需强制覆盖端口，也可在此放 PAYMENT_PORT/IMAGE_PORT
       },
-      error_file: './logs/pm2-error.log',
-      out_file: './logs/pm2-out.log',
-      log_file: './logs/pm2-combined.log',
+      out_file: '/home/tg_bot_picture_v1/logs/pm2-out.log',
+      error_file: '/home/tg_bot_picture_v1/logs/pm2-error.log',
+      merge_logs: true,
       time: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      // 重启策略
       restart_delay: 4000,
-      min_uptime: '10s',
-      max_restarts: 10,
-      // 停止配置
-      kill_timeout: 3000,
-      wait_ready: true,
-      listen_timeout: 3000,
-      // 进程健康检查
-      health_check_grace_period: 3000
+      kill_timeout: 3000
+      // ⚠️ 不要用 wait_ready / listen_timeout（那是 Node 专用的 ready 信号）
     }
   ]
-} 
+}
