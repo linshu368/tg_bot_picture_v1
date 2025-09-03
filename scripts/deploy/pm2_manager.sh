@@ -5,6 +5,7 @@
 
 APP_NAME="tg-bot-picture"
 PROJECT_DIR="/home/tg_bot_picture_v1"
+RUN_SH="$PROJECT_DIR/scripts/deploy/run.sh"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -25,8 +26,19 @@ check_pm2() {
     fi
 }
 
+# 检查 run.sh 是否在运行（避免端口冲突）
+check_runsh_conflict() {
+    if pgrep -f "$RUN_SH" >/dev/null; then
+        echo -e "${RED}❌ 检测到 run.sh 正在运行！${NC}"
+        echo -e "${YELLOW}请先停止 run.sh 再执行 PM2 管理命令${NC}"
+        echo "👉 停止方法: 在运行 run.sh 的终端按 Ctrl+C"
+        exit 1
+    fi
+}
+
 # 启动应用
 start_app() {
+    check_runsh_conflict
     echo -e "${BLUE}🚀 启动 Telegram Bot...${NC}"
     cd "$PROJECT_DIR"
     pm2 start ecosystem.config.js
@@ -43,6 +55,7 @@ stop_app() {
 
 # 重启应用
 restart_app() {
+    check_runsh_conflict
     echo -e "${BLUE}🔄 重启 Telegram Bot...${NC}"
     pm2 restart "$APP_NAME"
     echo -e "${GREEN}✅ Bot 重启完成！${NC}"
@@ -135,4 +148,4 @@ case "$1" in
         show_help
         exit 1
         ;;
-esac 
+esac
