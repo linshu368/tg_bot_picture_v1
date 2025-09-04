@@ -60,7 +60,8 @@ def get_git_metadata():
     """获取当前 commit 的元信息（author、date、短哈希）"""
     commit_id = subprocess.getoutput("git rev-parse HEAD")
     author = subprocess.getoutput("git config user.name") + " <" + subprocess.getoutput("git config user.email") + ">"
-    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S %z")
+    # 使用本地时区，确保 %z 输出形如 +0800
+    date = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
     return commit_id, author, date
 
 
@@ -98,8 +99,8 @@ def main():
         }
     }
 
-    # 输出 JSON（给 commit_msg.sh 用）
-    print(json.dumps(commit_log, ensure_ascii=False))
+    # 输出 JSON（给 commit_msg.sh 用）- 使用缩进便于可读
+    print(json.dumps(commit_log, ensure_ascii=False, indent=2))
 
     # 存档到 logs/snapshots
     log_dir = root_path / "logs" / "snapshots"
