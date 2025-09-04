@@ -1,1 +1,63 @@
- # 外圈（项目长期语境）+ 中圈（阶段任务）
+project:
+  intro: |
+    项目名称：tg_bot_picture_v1
+    项目类型：Telegram Bot V2
+    项目目标：基于 Telegram Bot 实现图片处理、支付系统集成、用户会话管理。
+    技术栈：
+      - Python 3.x
+      - Supabase (PostgreSQL)
+      - ClothOff 外部图像处理 API
+      - Python-telegram-bot
+      - PM2 进程管理
+    架构特点：
+      - Clean Architecture 分层架构 + 依赖倒置
+      - DDD（领域驱动设计）
+      - Repository Pattern（仓储模式）
+      - CQRS（命令查询分离）
+      - Dependency Injection（依赖注入容器）
+    模块划分：
+      - 用户管理：注册、认证、积分系统
+      - 图像处理：AI 图像处理服务
+      - 支付系统：积分充值和消费
+      - 会话管理：用户状态和对话流程
+      - 系统配置：动态配置
+      - 操作记录：用户行为追踪与审计
+    部署与运维：
+      - PM2 进程管理
+      - 日志记录与健康检查
+      - Supabase 数据迁移脚本
+
+workstream:
+  current_mission: |
+    当前迭代目标：建立轻量级版本管理与开发轨迹记录机制。
+    阶段性目标：
+      - 用最小成本获得可靠的快照与回滚能力
+      - 自动化生成 commit message，减少人工干预
+      - 为未来演进到完整 CI/CD 流程预留升级空间
+    涉及修改层级：
+      - scripts （快照/回滚/钩子脚本）
+      - gpt （AI 提交信息生成）
+      - logs （日志与快照存档）
+
+  change_scope_guide: |
+    scope 范围约定（生成 commit message 时的参考）：
+      - core：应用核心与生命周期
+      - domain：业务服务逻辑
+      - db：数据库与仓储层
+      - api：外部 API 或消息处理
+      - infra：脚本、部署、CI/CD、配置
+      - ui：用户交互（Telegram 界面）
+      - gpt：AI 工具与 prompt
+      - scripts：运维/辅助脚本
+      - logs：日志、快照
+
+conventions:
+  commit_types:
+    - feat
+    - fix
+    - docs
+    - refactor
+    - perf
+    - test
+    - chore
+  default_scope: core

@@ -4,66 +4,41 @@ import argparse
 import json
 import sys
 import yaml
+import subprocess
 from pathlib import Path
+from datetime import datetime
 
-# 引入你写的 gptCaller
-sys.path.append(str(Path(__file__).resolve().parents[2] / "gpt" / "utils"))
-from direct_api import gptCaller
+# 引入 gptCaller 与参数模板
+root_path = Path(__file__).resolve().parents[2]
+sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
+from gpt.utils.direct_api import gptCaller
+from gpt.param import commit_msg_prompt_template
 
 
 def build_prompt(config_path: str, diff_file: str) -> str:
-    """
-    构造 prompt（外圈+中圈+内圈diff）
-    """
-    # 加载 config.yaml
+    """基于模板 commit_msg.prompt 渲染 prompt"""
     with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+        config = yaml.safe_load(f) or {}
 
-    outer = config.get("project", {}).get("intro", "")
-    inner = config.get("workstream", {}).get("current_mission", "")
-    scope_guide = config.get("workstream", {}).get("change_scope_guide", "")
+    project_intro = (config.get("project") or {}).get("intro") or ""
+    current_mission = (config.get("workstream") or {}).get("current_mission") or ""
+    scope_guide = (config.get("workstream") or {}).get("change_scope_guide") or ""
 
-    # 读取 diff
     with open(diff_file, "r", encoding="utf-8") as f:
-        diff = f.read()
+        diff_content = f.read()
 
-    prompt = f"""
-你是资深软件工程助理，请基于“靶心原则”生成**约定式提交**信息以及简明的要点列表。
-
-【外圈：项目与架构（长期稳定）】
-{outer}
-
-【中圈：当前任务与阶段目标】
-{inner}
-
-【中圈：变更影响层级参考】
-{scope_guide}
-
-【内圈：本次暂存变更的diff（只读）】
-{diff}
-
-要求：
-1. 生成一行符合 Conventional Commits 的标题，格式：
-   <type>(<scope>): <subject-中文简述，不超过60字>
-   type 必须是：feat / fix / docs / refactor / perf / test / chore
-   scope 建议简短（如 api/db/core）
-2. 给出3-6条要点（中文，短句，聚焦影响面与风险）
-3. 如涉及数据库/接口变更，补充“回滚注意事项”，否则写“无”
-
-只输出 Markdown，结构：
-# title
-- point1
-- point2
-...
-> rollback: ...
-"""
+    prompt = (
+        commit_msg_prompt_template
+        .replace("{project.intro}", project_intro)
+        .replace("{workstream.current_mission}", current_mission)
+        .replace("{workstream.change_scope_guide}", scope_guide)
+        .replace("{git diff --cached}", diff_content)
+    )
     return prompt
 
 
 def parse_response(md: str):
-    """
-    解析 AI 返回的 markdown，提取 title + body
-    """
+    """解析 AI 返回的 markdown，提取 title + body"""
     lines = [l.strip() for l in md.splitlines() if l.strip()]
     title = ""
     body_lines = []
@@ -81,10 +56,19 @@ def parse_response(md: str):
     return title, "\n".join(body_lines).strip()
 
 
+def get_git_metadata():
+    """获取当前 commit 的元信息（author、date、短哈希）"""
+    commit_id = subprocess.getoutput("git rev-parse HEAD")
+    author = subprocess.getoutput("git config user.name") + " <" + subprocess.getoutput("git config user.email") + ">"
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S %z")
+    return commit_id, author, date
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", required=True, help="路径: gpt/prompt/config.yaml")
     parser.add_argument("--diff", required=True, help="路径: 暂存区 diff 文件")
+    parser.add_argument("--output", required=False, help="输出文件（可选）")
     args = parser.parse_args()
 
     # 构造 prompt
@@ -95,20 +79,36 @@ def main():
     try:
         md = gpt.get_response(prompt)
     except Exception as e:
-        # 兜底策略：AI 调用失败时避免 commit 中断
-        fallback = {
-            "title": "chore(core): update",
-            "body": f"> AI 生成失败: {str(e)}"
+        title = "chore(core): update"
+        body = f"> AI 生成失败: {str(e)}"
+    else:
+        title, body = parse_response(md)
+
+    # 获取 commit 元数据
+    commit_id, author, date = get_git_metadata()
+
+    # 组装完整日志
+    commit_log = {
+        "commit_id": commit_id,
+        "author": author,
+        "date": date,
+        "message": {
+            "title": title,
+            "body": body
         }
-        print(json.dumps(fallback, ensure_ascii=False))
-        return
+    }
 
-    title, body = parse_response(md)
+    # 输出 JSON（给 commit_msg.sh 用）
+    print(json.dumps(commit_log, ensure_ascii=False))
 
-    # 输出 JSON 给 commit_msg.sh 使用
-    result = {"title": title, "body": body}
-    print(json.dumps(result, ensure_ascii=False))
+    # 存档到 logs/snapshots
+    log_dir = root_path / "logs" / "snapshots"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    with open(log_dir / f"{ts}.json", "w", encoding="utf-8") as f:
+        json.dump(commit_log, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
     main()
+

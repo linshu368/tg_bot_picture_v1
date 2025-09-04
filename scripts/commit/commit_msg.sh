@@ -8,9 +8,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # 配置文件路径（你放在 gpt/prompt/ 下）
 CONFIG="$REPO_ROOT/gpt/prompt/config.yaml"
 
-# 快照目录（用于保存每次生成的 commit 信息）
-LOG_DIR="$REPO_ROOT/logs/snapshots"
-mkdir -p "$LOG_DIR"
+# 模板路径
+TEMPLATE="$REPO_ROOT/gpt/prompt/commit_msg.prompt"
 
 # 临时 diff 文件
 DIFF_FILE="$(mktemp -t diff.XXXXXX.patch)"
@@ -22,20 +21,19 @@ if [[ ! -s "$DIFF_FILE" ]]; then
   exit 0
 fi
 
-# 调用 Python 脚本（会输出 JSON 格式结果）
+# Python 解释器（优先 venv）
 PY_BIN="$REPO_ROOT/venv/bin/python"
-if [ -x "$PY_BIN" ]; then
-  :
-else
+if [ ! -x "$PY_BIN" ]; then
   PY_BIN="python3"
 fi
 
+# 调用 Python 脚本（返回完整 JSON）
 OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
   --prompt "$CONFIG" --diff "$DIFF_FILE")"
 
-# 解析 JSON（需要 jq 工具，如果没有 jq，可以换成 python 解析）
-title="$(echo "$OUT_JSON" | jq -r '.title')"
-body="$(echo "$OUT_JSON" | jq -r '.body')"
+# 用 jq 提取 commit message 部分
+title="$(echo "$OUT_JSON" | jq -r '.message.title')"
+body="$(echo "$OUT_JSON" | jq -r '.message.body')"
 
 # 写入最终 commit message
 {
@@ -44,6 +42,8 @@ body="$(echo "$OUT_JSON" | jq -r '.body')"
   echo "$body"
 } > "$COMMIT_MSG_FILE"
 
-# 额外保存快照
+# 保存完整 JSON 快照（gen_commit_msg.py 里已经保存过，这里可选）
+SNAPSHOT_DIR="$REPO_ROOT/logs/snapshots"
+mkdir -p "$SNAPSHOT_DIR"
 ts="$(date +%Y%m%d-%H%M%S)"
-echo -e "# $title\n\n$body" > "$LOG_DIR/$ts.md"
+echo "$OUT_JSON" > "$SNAPSHOT_DIR/$ts.json"
