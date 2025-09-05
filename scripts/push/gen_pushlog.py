@@ -28,11 +28,10 @@ def build_prompt(config_path: str, diff_content: str) -> str:
 
 
 def parse_response(md: str):
-    """解析 AI 返回的 markdown，提取 title + body + super_title"""
+    """解析 AI 返回的 markdown，提取 title + body"""
     lines = [l.strip() for l in md.splitlines() if l.strip()]
     title = ""
     body_lines = []
-    super_title = ""
 
     for i, line in enumerate(lines):
         if line.startswith("# "):
@@ -44,13 +43,7 @@ def parse_response(md: str):
         title = lines[0]
         body_lines = lines[1:]
 
-    # 查找 super_title
-    for line in lines:
-        if line.startswith("> super_title:"):
-            super_title = line[14:].strip()
-            break
-
-    return title, "\n".join(body_lines).strip(), super_title
+    return title, "\n".join(body_lines).strip()
 
 
 def collect_commit_diffs(commits):
@@ -102,20 +95,18 @@ prompt = build_prompt(args.prompt, diff_content)
 gpt = gptCaller()
 try:
     md = gpt.get_response(prompt)
-    title, body, super_title = parse_response(md)
+    title, body = parse_response(md)
 except Exception as e:
     # fallback 到原来的逻辑
     if commitlogs:
         title = commitlogs[-1]["message"]["title"]
         body = "\n".join([c["message"]["title"] for c in commitlogs])
-        super_title = title
     else:
-        title, body, super_title = "push update", "no commitlogs found", "push update"
+        title, body = "push update", "no commitlogs found"
 
 message = {
     "title": title,
-    "body": body,
-    "super_title": super_title
+    "body": body
 }
 
 # pushlog 对象
