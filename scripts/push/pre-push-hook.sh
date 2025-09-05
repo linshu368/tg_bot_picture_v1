@@ -3,6 +3,7 @@ set -e
 
 REMOTE="$1"
 URL="$2"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 while read local_ref local_sha remote_ref remote_sha
 do
@@ -14,8 +15,9 @@ do
 
     COMMITS=$(git log $RANGE --pretty=format:"%H")
 
-    python3 scripts/gen_pushlog.py \
+    "$REPO_ROOT/venv/bin/python" scripts/push/gen_pushlog.py \
         --remote "$REMOTE" \
         --branch "$(git rev-parse --abbrev-ref HEAD)" \
-        --commits "$COMMITS"
+        --commits "$COMMITS" \
+        --prompt "$REPO_ROOT/gpt/prompt/config.yaml"
 done

@@ -12,7 +12,7 @@ from datetime import datetime
 root_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
 from gpt.utils.direct_api import gptCaller
-from gpt.param import commit_msg_prompt_template, commit_process_diff_prompt_template
+from gpt.param import commit_process_diff_prompt_template
 
 
 def build_prompt(config_path: str, diff_file: str) -> str:

@@ -5,7 +5,7 @@ from pathlib import Path
 root_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
 from gpt.utils.direct_api import gptCaller
-from gpt.param import push_msg_prompt_template
+from gpt.param import commit_process_diff_prompt_template
 
 
 def build_prompt(config_path: str, diff_content: str) -> str:
@@ -18,7 +18,7 @@ def build_prompt(config_path: str, diff_content: str) -> str:
     scope_guide = (config.get("workstream") or {}).get("change_scope_guide") or ""
 
     prompt = (
-        push_msg_prompt_template
+        commit_process_diff_prompt_template
         .replace("{project.intro}", project_intro)
         .replace("{workstream.current_mission}", current_mission)
         .replace("{workstream.change_scope_guide}", scope_guide)

@@ -5,11 +5,9 @@ file_dir_path = os.path.dirname(os.path.abspath(__file__))
 
 
 ###############################  diff改动总结  #####################################
-commit_msg_prompt_path = os.path.join(file_dir_path, "prompt", "commit_msg.prompt")
-commit_msg_prompt_template = read_prompt_template(commit_msg_prompt_path)
+# commit_msg_prompt_path = os.path.join(file_dir_path, "prompt", "commit_msg.prompt")
+# commit_msg_prompt_template = read_prompt_template(commit_msg_prompt_path)
 
 commit_process_diff_prompt_path = os.path.join(file_dir_path, "prompt", "commit_process_diff.prompt")
 commit_process_diff_prompt_template = read_prompt_template(commit_process_diff_prompt_path)
 
-push_msg_prompt_path = os.path.join(file_dir_path, "prompt", "push_msg.prompt")
-push_msg_prompt_template = read_prompt_template(push_msg_prompt_path)
