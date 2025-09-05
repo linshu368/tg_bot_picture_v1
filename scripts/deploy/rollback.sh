@@ -20,10 +20,10 @@ git checkout main
 git pull origin main
 
 # 创建备份 tag
-BACKUP_TAG="backup-before-rollback-$(date +%F_%H%M%S)"
-git tag "$BACKUP_TAG"
-git push origin "$BACKUP_TAG"
-echo "✅ 已创建备份 tag: $BACKUP_TAG"
+# BACKUP_TAG="backup-before-rollback-$(date +%F_%H%M%S)"
+# git tag "$BACKUP_TAG"
+# git push origin "$BACKUP_TAG"
+# echo "✅ 已创建备份 tag: $BACKUP_TAG"
 
 # 回退 main 到目标 commit
 echo "↩️  回滚 main 到 $TARGET ..."

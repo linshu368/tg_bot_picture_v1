@@ -1,31 +1,310 @@
 project:
   intro: |
-    项目名称：tg_bot_picture_v1
-    项目类型：Telegram Bot V2
-    项目目标：基于 Telegram Bot 实现图片处理、支付系统集成、用户会话管理。
-    技术栈：
-      - Python 3.x
-      - Supabase (PostgreSQL)
-      - ClothOff 外部图像处理 API
-      - Python-telegram-bot
-      - PM2 进程管理
-    架构特点：
-      - Clean Architecture 分层架构 + 依赖倒置
-      - DDD（领域驱动设计）
-      - Repository Pattern（仓储模式）
-      - CQRS（命令查询分离）
-      - Dependency Injection（依赖注入容器）
-    模块划分：
-      - 用户管理：注册、认证、积分系统
-      - 图像处理：AI 图像处理服务
-      - 支付系统：积分充值和消费
-      - 会话管理：用户状态和对话流程
-      - 系统配置：动态配置
-      - 操作记录：用户行为追踪与审计
-    部署与运维：
-      - PM2 进程管理
-      - 日志记录与健康检查
-      - Supabase 数据迁移脚本
+    # Telegram Bot AI图像处理项目架构图
+
+    ## 项目概述
+
+    本项目是一个基于Telegram Bot的AI图像处理服务，主要功能包括：
+    - 🤖 Telegram Bot交互界面
+    - 🖼️ AI图像处理（使用ClothOff API）
+    - 💰 积分充值与支付系统
+    - 👤 用户管理与会话控制
+    - 📊 数据持久化（Supabase）
+
+
+    ## 分层架构图
+
+    ```
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                        外部用户层                                │
+    │                    (Telegram Users)                             │
+    └─────────────────────────┬───────────────────────────────────────┘
+                              │
+    ┌─────────────────────────▼───────────────────────────────────────┐
+    │                      接口适配层                                  │
+    │                 (Interface Adapters)                            │
+    │  ┌─────────────────────────────────────────────────────────┐   │
+    │  │              Telegram Bot Interface                      │   │
+    │  │  ├─ bot.py              主Bot控制器                      │   │
+    │  │  ├─ ui_handler.py       UI交互处理                      │   │
+    │  │  ├─ user_state_manager  用户状态管理                     │   │
+    │  │  └─ handlers/           处理器集合                       │   │
+    │  │      ├─ message_handlers.py    消息处理                 │   │
+    │  │      ├─ callback_manager.py    回调管理                 │   │
+    │  │      ├─ image_processing.py    图像处理                 │   │
+    │  │      ├─ callback/              回调处理器               │   │
+    │  │      └─ command/               命令处理器               │   │
+    │  └─────────────────────────────────────────────────────────┘   │
+    └─────────────────────────┬───────────────────────────────────────┘
+                              │
+    ┌─────────────────────────▼───────────────────────────────────────┐
+    │                      应用核心层                                  │
+    │                   (Application Core)                            │
+    │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+    │  │  Container   │  │ Application  │  │  Lifecycle   │          │
+    │  │  依赖注入容器 │  │   应用管理    │  │  生命周期管理 │          │
+    │  └──────────────┘  └──────────────┘  └──────────────┘          │
+    └─────────────────────────┬───────────────────────────────────────┘
+                              │
+    ┌─────────────────────────▼───────────────────────────────────────┐
+    │                        领域层                                    │
+    │                    (Domain Layer)                               │
+    │  ┌─────────────────────────────────────────────────────────┐   │
+    │  │                    Domain Services                       │   │
+    │  │  ├─ user_service.py         用户管理服务                │   │
+    │  │  ├─ payment_service.py      支付管理服务                │   │
+    │  │  ├─ image_service.py        图像处理服务                │   │
+    │  │  ├─ session_service.py      会话管理服务                │   │
+    │  │  ├─ action_record_service   行为记录服务                │   │
+    │  │  └─ system_config_service   系统配置服务                │   │
+    │  └─────────────────────────────────────────────────────────┘   │
+    └─────────────────────────┬───────────────────────────────────────┘
+                              │
+    ┌─────────────────────────▼───────────────────────────────────────┐
+    │                      基础设施层                                  │
+    │                 (Infrastructure Layer)                          │
+    │ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐│
+    │ │  Database   │ │External APIs│ │  Webhooks   │ │ Messaging   ││
+    │ │  数据持久化  │ │  外部API集成 │ │  回调处理   │ │  消息处理   ││
+    │ │             │ │             │ │             │ │             ││
+    │ │ Supabase    │ │ ClothOff    │ │ Image Hook  │ │ Webhook     ││
+    │ │ Manager     │ │ API         │ │ Payment Hook│ │ Handler     ││
+    │ │             │ │             │ │             │ │             ││
+    │ │ V2 Repos:   │ │ Payment     │ │ Flask Apps  │ │ Processor   ││
+    │ │ • Composite │ │ API         │ │             │ │             ││
+    │ │ • Single    │ │             │ │             │ │             ││
+    │ └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘│
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    ## 详细目录结构
+
+    ```
+    /home/tg_bot_picture_v1/
+    ├── main.py                    # 🚀 应用程序主入口
+    ├── requirements.txt           # 📦 Python依赖包列表
+    ├── ecosystem.config.js        # ⚙️ PM2进程管理配置
+    ├── README.md                  # 📚 项目说明文档
+    ├── 快速启动.md                # 🏃 快速启动指南
+    │
+    ├── src/                       # 💼 源代码主目录
+    │   ├── __init__.py
+    │   │
+    │   ├── core/                  # 🎯 应用核心层
+    │   │   ├── __init__.py
+    │   │   ├── app.py            # 应用主类（已废弃，功能移至main.py）
+    │   │   ├── container.py      # 依赖注入容器配置
+    │   │   └── lifecycle.py      # 应用生命周期管理
+    │   │
+    │   ├── domain/               # 🏛️ 领域层（业务逻辑）
+    │   │   └── services/         # 领域服务
+    │   │       ├── user_service.py          # 用户管理（注册、签到、积分）
+    │   │       ├── payment_service.py       # 支付处理（订单、充值）
+    │   │       ├── image_service.py         # 图像任务管理
+    │   │       ├── session_service.py       # 会话管理
+    │   │       ├── action_record_service.py # 用户行为记录
+    │   │       └── system_config_service.py # 系统配置管理
+    │   │
+    │   ├── infrastructure/       # 🏗️ 基础设施层
+    │   │   ├── database/         # 数据库相关
+    │   │   │   ├── __init__.py
+    │   │   │   ├── supabase_manager.py     # Supabase连接管理
+    │   │   │   ├── repositories/          # V1版本仓储（逐步废弃中）
+    │   │   │   │   ├── base_repository.py
+    │   │   │   │   ├── supabase_*.py      # 各种Supabase仓储实现
+    │   │   │   │   └── ...
+    │   │   │   └── repositories_v2/       # V2版本仓储（主要使用）
+    │   │   │       ├── composite/         # 组合仓储（跨表事务）
+    │   │   │       │   ├── user_composite_repository.py
+    │   │   │       │   ├── point_composite_repository.py
+    │   │   │       │   ├── session_composite_repository.py
+    │   │   │       │   └── action_composite_repository.py
+    │   │   │       └── single/            # 单表仓储
+    │   │   │           ├── base_repository_v2.py
+    │   │   │           ├── user_repository_v2.py
+    │   │   │           ├── payment_order_repository_v2.py
+    │   │   │           ├── image_task_repository_v2.py
+    │   │   │           └── ...
+    │   │   │
+    │   │   ├── external_apis/    # 外部API集成
+    │   │   │   ├── __init__.py
+    │   │   │   ├── clothoff_api.py        # ClothOff图像处理API
+    │   │   │   └── payment_api.py         # 支付接口封装
+    │   │   │
+    │   │   └── messaging/        # 消息和Webhook处理
+    │   │       ├── webhook_handler.py     # Webhook处理基类
+    │   │       ├── image_webhook.py       # 图像处理回调服务
+    │   │       └── payment_webhook.py     # 支付回调服务
+    │   │
+    │   ├── interfaces/           # 🔌 接口适配层
+    │   │   └── telegram/         # Telegram Bot接口实现
+    │   │       ├── bot.py                 # Bot主控制器
+    │   │       ├── ui_handler.py          # UI交互处理
+    │   │       ├── user_state_manager.py  # 用户状态管理
+    │   │       └── handlers/              # 各类处理器
+    │   │           ├── message_handlers.py      # 消息处理
+    │   │           ├── callback_manager.py      # 回调管理
+    │   │           ├── image_processing.py      # 图像处理流程
+    │   │           ├── callback/                # 回调处理器
+    │   │           │   ├── base_callback_handler.py
+    │   │           │   ├── function_callbacks.py      # 功能回调
+    │   │           │   ├── image_generation_callbacks.py # 图像生成回调
+    │   │           │   ├── payment_callbacks.py       # 支付回调
+    │   │           │   └── profile_callbacks.py       # 个人资料回调
+    │   │           └── command/                 # 命令处理器
+    │   │               ├── base_command_handler.py
+    │   │               ├── admin_commands.py    # 管理员命令
+    │   │               ├── payment_commands.py  # 支付相关命令
+    │   │               └── user_commands.py     # 用户命令
+    │   │
+    │   └── utils/                # 🛠️ 工具类
+    │       └── config/           # 配置管理
+    │           ├── app_config.py          # 应用配置
+    │           └── settings.py            # 设置管理
+    │
+    ├── gpt/                      # 🤖 GPT相关工具
+    │   ├── param.py             # 参数配置
+    │   ├── prompt/              # 提示词模板
+    │   │   ├── commit_msg.prompt
+    │   │   └── config.yaml
+    │   └── utils/               # 工具函数
+    │       ├── direct_api.py
+    │       └── files_utils.py
+    │
+    ├── scripts/                  # 📜 脚本工具
+    │   ├── deploy/              # 部署脚本
+    │   │   ├── manage_webhook.sh   # Webhook管理
+    │   │   ├── pm2_manager.sh      # PM2进程管理
+    │   │   ├── rollback.sh         # 回滚脚本
+    │   │   └── run.sh              # 运行脚本
+    │   ├── git/                 # Git相关脚本
+    │   │   └── snapshot.sh         # 快照脚本
+    │   └── commit/              # 提交相关脚本
+    │       ├── commit_msg.sh       # 提交信息生成
+    │       ├── gen_commit_msg.py   # Python提交信息生成
+    │       └── install_hooks.sh    # 安装Git钩子
+    │
+    ├── tests/                    # 🧪 测试代码
+    │   ├── test_*.py            # 各种单元测试
+    │   ├── quick_test.py        # 快速测试脚本
+    │   └── setup_supabase.py    # Supabase设置测试
+    │
+    ├── logs/                     # 📝 日志文件
+    │   ├── bot_v1.log          # Bot主日志
+    │   ├── image_webhook.log    # 图像回调日志
+    │   ├── payment_webhook_v1.log # 支付回调日志
+    │   └── pm2-*.log           # PM2进程日志
+    │
+    ├── data/                     # 📊 数据文件
+    │   └── telegram_bot_v2.db   # SQLite数据库（备用）
+    │
+    ├── docs/                     # 📖 项目文档
+    │   ├── 项目结构图.md         # 本文档
+    │   ├── WEBHOOK_GUIDE.md     # Webhook使用指南
+    │   ├── PM2_使用说明.md      # PM2使用说明
+    │   └── db/                  # 数据库文档
+    │       ├── Service与组合Repository调用关系分析报告.md
+    │       └── supabase_tables_v2.sql
+    │
+    └── venv/                     # 🐍 Python虚拟环境
+    ```
+
+
+
+    ## 核心数据流
+
+    ```mermaid
+    sequenceDiagram
+        participant U as 用户
+        participant TG as Telegram
+        participant TB as TelegramBot
+        participant US as UserService
+        participant IS as ImageService
+        participant PS as PaymentService
+        participant DB as Supabase
+        participant API as ClothOff API
+        
+        U->>TG: 发送图片
+        TG->>TB: 转发消息
+        TB->>US: 检查用户状态
+        US->>DB: 查询用户信息
+        
+        alt 积分充足
+            TB->>IS: 创建图像任务
+            IS->>DB: 扣除积分
+            IS->>API: 提交处理请求
+            API-->>IS: 返回任务ID
+            
+            Note over API: 异步处理图片
+            
+            API->>TB: Webhook回调
+            TB->>IS: 更新任务状态
+            TB->>U: 发送处理结果
+        else 积分不足
+            TB->>PS: 创建充值订单
+            PS->>DB: 保存订单
+            TB->>U: 发送支付链接
+        end
+    ```
+
+    ## 技术栈
+
+    ### 架构模式
+    - **Clean Architecture** - 清洁架构，分层设计
+    - **Dependency Injection** - 依赖注入模式
+    - **Repository Pattern** - 仓储模式
+    - **Composite Repository** - 组合仓储（V2新增）
+
+    ### 架构设计原则 
+    既要保证未来半年内系统的可维护性，可拓展性。又要坚持敏捷开发的节奏。需要在功能开发和系统维护成本之间寻求平衡。具体这个平衡点的关键因素就是项目的阶段，是起步期，成长期，还是成熟期。
+    目前的项目是起步期，所以不要过份的追求架构的固化，但是遵循以下设计原则。
+
+     1. **依赖倒置原则（DIP）**
+
+    * **类型**：面向对象设计原则
+    * **类别**：**高层设计原则**
+    * **描述**：DIP 强调了高层模块不应依赖于低层模块，而应依赖于抽象（接口或抽象类）。这有助于降低模块间的耦合度，方便系统扩展和维护。
+
+     2. **单一职责原则（SRP）**
+
+    * **类型**：面向对象设计原则
+    * **类别**：**类设计原则**
+    * **描述**：SRP 确保一个类或模块只负责一个功能，从而减少了类的复杂度，提升了可维护性和可扩展性。
+
+     3. **开闭原则（OCP）**
+
+    * **类型**：面向对象设计原则
+    * **类别**：**扩展性与稳定性原则**
+    * **描述**：OCP 鼓励系统的可扩展性，即对功能的扩展要开放，对修改关闭。通过使用抽象和多态等方式，可以在不修改现有代码的情况下增加新的功能。
+
+     4. **里氏替换原则（LSP）**
+
+    * **类型**：面向对象设计原则
+    * **类别**：**继承与多态原则**
+    * **描述**：LSP 确保子类对象可以替代父类对象而不会影响程序的行为，是开闭原则的基础之一，保证了继承结构的正确性和稳定性。
+
+     5. **接口隔离原则（ISP）**
+
+    * **类型**：面向对象设计原则
+    * **类别**：**接口设计原则**
+    * **描述**：ISP 强调接口应当小而专一，避免大而全的接口。通过拆分接口，每个接口满足特定用户的需求，减少了不必要的依赖。
+
+
+    这些原则属于 **面向对象设计（OOD）** 的范畴，目的是通过高效的设计模式和结构，降低系统的耦合度，提高可维护性、可扩展性和稳定性。它们帮助开发团队在面对复杂系统时做出清晰的架构决策，从而保证系统的长远发展。
+
+
+    ### 开发风格——敏捷开发
+    这是一个面向C端的产品，且是初期，所以要快速迭代。
+
+    1. **模块化与解耦性**：保持代码灵活和高度模块化，确保团队能够快速迭代各个模块，而不影响整体系统。每个模块应易于替换和升级，以便在敏捷开发中实现快速调整。
+
+    2. **快速迭代与持续交付**：强调通过短周期的开发与交付，快速推出最小可行产品（MVP）并验证市场需求。确保每次迭代都能快速响应用户反馈并进行优化。
+
+    3. **用户驱动与反馈循环**：敏捷开发强调与用户保持紧密的联系，确保开发优先级与实际需求紧密对接。定期收集用户反馈并进行快速的调整和改进。
+
+    4. **跨职能协作**：团队成员之间应紧密合作，跨职能的沟通和协作能够提高开发效率并减少需求变更导致的延误。
+
+    5. **自动化测试与持续集成**：确保系统具备强大的自动化测试和持续集成能力，以减少回归问题，并确保每次迭代都能快速、安全地部署。
 
 workstream:
   current_mission: |

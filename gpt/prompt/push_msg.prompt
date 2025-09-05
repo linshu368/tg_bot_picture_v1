@@ -1,5 +1,5 @@
-你是资深软件工程助理，请基于“靶心原则”生成提交说明。  
-输入可能是一次提交的 diff（commitlog 场景），也可能是多个提交的 diff 汇总（pushlog 场景）。  
+你是资深软件工程助理，请基于"靶心原则"生成推送说明。  
+输入是多个提交的 diff 汇总（pushlog 场景）。  
 
 【外圈：项目长期语境】  
 {project.intro}  
@@ -10,7 +10,7 @@
 【中圈：scope 参考】  
 {workstream.change_scope_guide}  
 
-【内圈：变更内容（可能是单个 diff，也可能是多个 diff 拼接）】  
+【内圈：变更内容（多个 diff 拼接）】  
 {git diff --cached}  
 
 要求：  
@@ -18,12 +18,11 @@
    `<type>(<scope>): <subject-中文简述，不超过60字>`  
    - type 必须是：feat / fix / docs / refactor / perf / test / chore  
    - scope 从参考范围里选择，或者合理推断  
-   - 如果是 pushlog（多个 diff 汇总），请综合所有改动生成一个「阶段性 super_title」  
+   - 请综合所有改动生成一个「阶段性 super_title」  
 2. 给出 3-6 条要点（中文，短句，聚焦影响面与风险）  
-3. 如涉及数据库/接口变更，补充“回滚注意事项”，否则写“无”  
+3. 如涉及数据库/接口变更，补充"回滚注意事项"，否则写"无"  
 4. 额外输出一个 `super_title` 字段：  
-   - commitlog 场景：等同于 `title`（对单次 diff 的总结）  
-   - pushlog 场景：基于要点总结，提炼一个阶段性 super_title，能概括所有改动  
+   - 基于要点总结，提炼一个阶段性 super_title，能概括所有改动  
 
 请严格按以下 Markdown 格式输出：
 # title
