@@ -4,6 +4,7 @@
 """
 
 import logging
+import asyncio
 from typing import Dict, Callable
 
 from telegram import Update
@@ -73,21 +74,29 @@ class CallbackManager:
         
         self.logger.info(f"收到回调: {data} from user {user_id}")
         
-        # 记录用户行为：点击回调按钮
-        try:
-            user_data = await self.user_service.get_user_by_telegram_id(user_id)
-            if user_data:
+        # 记录用户行为：点击回调按钮（后台任务，避免阻塞首响）
+        async def _background_log_callback():
+            try:
+                user_data = await self.user_service.get_user_by_telegram_id(user_id)
+                if not user_data:
+                    return
                 session = await self.session_service.get_or_create_session(user_data['id'])
-                if session:
-                    await self.action_record_service.record_action(
-                        user_id=user_data['id'],
-                        session_id=session['session_id'],
-                        action_type='callback_query',
-                        parameters={'callback_data': data},
-                        message_context=f'用户点击回调按钮: {data}'
-                    )
+                if not session:
+                    return
+                await self.action_record_service.record_action(
+                    user_id=user_data['id'],
+                    session_id=session['session_id'],
+                    action_type='callback_query',
+                    parameters={'callback_data': data},
+                    message_context=f'用户点击回调按钮: {data}'
+                )
+            except Exception as e:
+                self.logger.error(f"记录回调行为失败(后台): {e}")
+
+        try:
+            asyncio.create_task(_background_log_callback())
         except Exception as e:
-            self.logger.error(f"记录回调行为失败: {e}")
+            self.logger.error(f"调度回调日志后台任务失败: {e}")
         
         # 清除等待UID状态（如果用户点击其他按钮）
         try:

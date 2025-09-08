@@ -10,6 +10,7 @@ v2版本变化：
 """
 
 from typing import Dict, Any, List, Optional
+import asyncio
 from .base_repository_v2 import BaseRepositoryV2
 
 
@@ -43,8 +44,10 @@ class UserSessionRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(session_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 插入数据（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_session = result.data[0]
@@ -61,7 +64,9 @@ class UserSessionRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据记录ID获取会话"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', session_record_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', session_record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -75,7 +80,9 @@ class UserSessionRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据session_id获取会话"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('session_id', session_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('session_id', session_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -126,7 +133,7 @@ class UserSessionRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -158,7 +165,9 @@ class UserSessionRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """批量获取多个用户的会话"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').in_('user_id', user_ids).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').in_('user_id', user_ids).execute()
+            )
             return result.data or []
             
         except Exception as e:
@@ -190,7 +199,9 @@ class UserSessionRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             session_ids = [session['id'] for session in sessions]
             
             # 批量删除
-            result = client.table(self.table_name).delete().in_('id', session_ids).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).delete().in_('id', session_ids).execute()
+            )
             
             deleted_count = len(result.data) if result.data else 0
             self.logger.info(f"清理用户会话成功: user_id={user_id}, count={deleted_count}")

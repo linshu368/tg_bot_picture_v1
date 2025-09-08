@@ -16,6 +16,7 @@ SessionCompositeRepository V2 - 会话管理组合Repository
 """
 
 import logging
+import asyncio
 import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
@@ -101,17 +102,14 @@ class SessionCompositeRepository:
             session_data = session_data or {}
             
             async with self._transaction() as rollback_actions:
-                
-                # 1. 创建用户会话关联
+                # 1. 核心写：创建用户会话关联（同步）
                 session_association = await self.session_repo.create({
                     'user_id': user_id,
                     'session_id': session_id
                 })
-                
-                # 添加回滚操作
                 rollback_actions.append(lambda: self.session_repo.delete(session_association['id']))
-                
-                # 2. 创建会话详细记录
+
+                # 2/3. 次要写：创建会话记录、更新统计（后台）
                 record_data = {
                     'user_id': user_id,
                     'session_id': session_id,
@@ -121,15 +119,22 @@ class SessionCompositeRepository:
                     'duration_sec': None,
                     'summary': session_data.get('summary')
                 }
-                
-                session_record = await self.record_repo.create(record_data)
-                rollback_actions.append(lambda: self.record_repo.delete(session_record['id']))
-                
-                # 3. 更新用户活动统计
-                await self.stats_repo.increment_session_count(user_id)
-                
+
+                async def _background_record_and_stats():
+                    try:
+                        created_record = await self.record_repo.create(record_data)
+                        # 注意：后台任务不纳入回滚
+                        await self.stats_repo.increment_session_count(user_id)
+                    except Exception as bg_err:
+                        self.logger.error(f"创建会话记录/更新统计失败(后台): {bg_err}")
+
+                try:
+                    asyncio.create_task(_background_record_and_stats())
+                except Exception as schedule_err:
+                    self.logger.error(f"调度会话后台任务失败: {schedule_err}")
+
                 self.logger.info(f"会话创建成功: user_id={user_id}, session_id={session_id}")
-                
+
                 return self._standardize_error_response(
                     success=True,
                     message="会话创建成功",
@@ -137,8 +142,7 @@ class SessionCompositeRepository:
                         'session_id': session_id,
                         'user_id': user_id,
                         'started_at': record_data['started_at'],
-                        'session_association': session_association,
-                        'session_record': session_record
+                        'session_association': session_association
                     }
                 )
                 
@@ -151,23 +155,14 @@ class SessionCompositeRepository:
             )
     
     async def end_session(self, session_id: str, message_count_user: int = None, summary: str = None) -> Dict[str, Any]:
-        """结束会话
+        """结束会话 (优化版)
         
         跨表操作：
-        1. session_records_v2: 设置结束时间和统计信息
-        2. user_activity_stats_v2: 更新最后活跃时间和消息统计
-        
-        Args:
-            session_id: 会话ID
-            message_count_user: 用户消息总数
-            summary: 会话总结
-            
-        Returns:
-            标准化响应格式
+        1. session_records_v2: 设置结束时间和统计信息 (同步)
+        2. user_activity_stats_v2: 更新最后活跃时间和消息统计 (后台异步)
         """
         try:
             async with self._transaction() as rollback_actions:
-                
                 # 获取会话记录
                 session_record = await self.record_repo.find_one(session_id=session_id)
                 if not session_record:
@@ -176,12 +171,12 @@ class SessionCompositeRepository:
                         message=f"会话不存在: {session_id}",
                         data=None
                     )
-                
+
                 # 计算持续时间
                 ended_at = datetime.utcnow().isoformat()
                 started_at = session_record.get('started_at')
                 duration_sec = None
-                
+
                 if started_at:
                     try:
                         start_dt = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
@@ -189,23 +184,23 @@ class SessionCompositeRepository:
                         duration_sec = int((end_dt - start_dt).total_seconds())
                     except Exception as e:
                         self.logger.warning(f"计算会话持续时间失败: {e}")
-                
-                # 更新会话记录
+
+                # 更新会话记录 (同步)
                 old_record_data = session_record.copy()
                 update_data = {
                     'ended_at': ended_at,
                     'duration_sec': duration_sec
                 }
-                
+
                 if message_count_user is not None:
                     update_data['message_count_user'] = message_count_user
                 if summary is not None:
                     update_data['summary'] = summary
-                
+
                 success = await self.record_repo.update(session_record['id'], update_data)
                 if not success:
                     raise Exception("更新会话记录失败")
-                
+
                 # 添加回滚操作
                 rollback_actions.append(lambda: self.record_repo.update(session_record['id'], {
                     'ended_at': old_record_data.get('ended_at'),
@@ -213,15 +208,21 @@ class SessionCompositeRepository:
                     'message_count_user': old_record_data.get('message_count_user'),
                     'summary': old_record_data.get('summary')
                 }))
-                
-                # 更新用户活动统计
+
+                # 后台异步更新用户统计
                 user_id = session_record['user_id']
-                if message_count_user:
-                    await self.stats_repo.increment_message_count(user_id, message_count_user)
-                await self.stats_repo.update_last_active_time(user_id)
-                
+                async def _background_update_stats():
+                    try:
+                        if message_count_user:
+                            await self.stats_repo.increment_message_count(user_id, message_count_user)
+                        await self.stats_repo.update_last_active_time(user_id)
+                    except Exception as bg_err:
+                        self.logger.error(f"会话结束时更新用户统计失败(后台): {bg_err}")
+
+                asyncio.create_task(_background_update_stats())
+
                 self.logger.info(f"会话结束成功: session_id={session_id}")
-                
+
                 return self._standardize_error_response(
                     success=True,
                     message="会话结束成功",
@@ -233,7 +234,7 @@ class SessionCompositeRepository:
                         'summary': summary
                     }
                 )
-                
+
         except Exception as e:
             self.logger.error(f"结束会话失败: {e}")
             return self._standardize_error_response(
@@ -241,21 +242,16 @@ class SessionCompositeRepository:
                 message=f"结束会话失败: {str(e)}",
                 data=None
             )
+
     
     async def update_session_activity(self, session_id: str, message_count: int = None, update_stats: bool = True) -> Dict[str, Any]:
-        """更新会话活动
+        """更新会话活动 (优化版)
         
-        Args:
-            session_id: 会话ID
-            message_count: 消息数量（增量）
-            update_stats: 是否同时更新用户统计
-            
-        Returns:
-            标准化响应格式
+        1. 更新 session_records_v2 (同步)
+        2. user_activity_stats_v2 更新 (后台异步)
         """
         try:
             async with self._transaction() as rollback_actions:
-                
                 # 获取会话记录
                 session_record = await self.record_repo.find_one(session_id=session_id)
                 if not session_record:
@@ -264,33 +260,39 @@ class SessionCompositeRepository:
                         message=f"会话不存在: {session_id}",
                         data=None
                     )
-                
-                # 更新会话记录
+
+                # 更新会话记录 (同步)
                 if message_count:
                     old_count = session_record.get('message_count_user', 0)
                     new_count = old_count + message_count
-                    
+
                     success = await self.record_repo.update(session_record['id'], {
                         'message_count_user': new_count
                     })
-                    
+
                     if not success:
                         raise Exception("更新会话消息数量失败")
-                    
+
                     # 添加回滚操作
                     rollback_actions.append(lambda: self.record_repo.update(session_record['id'], {
                         'message_count_user': old_count
                     }))
-                
-                # 更新用户统计
+
+                # 后台异步更新用户统计
                 if update_stats:
                     user_id = session_record['user_id']
-                    if message_count:
-                        await self.stats_repo.increment_message_count(user_id, message_count)
-                    await self.stats_repo.update_last_active_time(user_id)
-                
+                    async def _background_update_stats():
+                        try:
+                            if message_count:
+                                await self.stats_repo.increment_message_count(user_id, message_count)
+                            await self.stats_repo.update_last_active_time(user_id)
+                        except Exception as bg_err:
+                            self.logger.error(f"更新会话活动时更新用户统计失败(后台): {bg_err}")
+
+                    asyncio.create_task(_background_update_stats())
+
                 self.logger.debug(f"会话活动更新成功: session_id={session_id}")
-                
+
                 return self._standardize_error_response(
                     success=True,
                     message="会话活动更新成功",
@@ -300,7 +302,7 @@ class SessionCompositeRepository:
                         'stats_updated': update_stats
                     }
                 )
-                
+
         except Exception as e:
             self.logger.error(f"更新会话活动失败: {e}")
             return self._standardize_error_response(
@@ -308,6 +310,7 @@ class SessionCompositeRepository:
                 message=f"更新会话活动失败: {str(e)}",
                 data=None
             )
+
     
     # ==================== 查询接口（兼容旧版） ====================
     

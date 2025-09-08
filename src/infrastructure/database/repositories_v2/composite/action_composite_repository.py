@@ -10,6 +10,7 @@
 """
 
 import logging
+import asyncio
 import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
@@ -73,19 +74,25 @@ class ActionCompositeRepository:
                 action_record = await self.action_repo.create(data)
                 rollback_actions.append(lambda: self.action_repo.delete(action_record['id']))
                 
-                # 2. 如果是新的会话，更新统计信息
+                # 2. 如果是新的会话，更新统计信息（后台，避免阻塞首响）
                 user_id = data['user_id']
                 action_type = data.get('action_type', '')
                 
-                if action_type in ['start_session', 'new_session']:
-                    # 增加会话计数
-                    await self.stats_repo.increment_session_count(user_id)
-                elif action_type in ['send_message', 'text_message', 'image_message']:
-                    # 增加消息计数
-                    await self.stats_repo.increment_message_count(user_id)
-                else:
-                    # 其他行为只更新最后活跃时间
-                    await self.stats_repo.update_last_active_time(user_id)
+                async def _background_stats_update():
+                    try:
+                        if action_type in ['start_session', 'new_session']:
+                            await self.stats_repo.increment_session_count(user_id)
+                        elif action_type in ['send_message', 'text_message', 'image_message']:
+                            await self.stats_repo.increment_message_count(user_id)
+                        else:
+                            await self.stats_repo.update_last_active_time(user_id)
+                    except Exception as bg_err:
+                        self.logger.error(f"更新行为统计失败(后台): {bg_err}")
+
+                try:
+                    asyncio.create_task(_background_stats_update())
+                except Exception as schedule_err:
+                    self.logger.error(f"调度行为统计后台任务失败: {schedule_err}")
                 
                 self.logger.info(f"行为记录创建成功: action_type={action_type}, user_id={user_id}")
                 return action_record
@@ -142,20 +149,26 @@ class ActionCompositeRepository:
                     'status': 'success'
                 }
                 
-                # 1. 创建行为记录
+                # 1. 创建行为记录（核心同步写）
                 action_record = await self.action_repo.create(action_data)
                 rollback_actions.append(lambda: self.action_repo.delete(action_record['id']))
                 
-                # 2. 自动更新统计信息
-                if action_type in ['start_session', 'new_session']:
-                    # 增加会话计数
-                    await self.stats_repo.increment_session_count(user_id)
-                elif action_type in ['send_message', 'text_message', 'image_message']:
-                    # 增加消息计数
-                    await self.stats_repo.increment_message_count(user_id)
-                else:
-                    # 其他行为只更新最后活跃时间
-                    await self.stats_repo.update_last_active_time(user_id)
+                # 2. 自动更新统计信息（后台）
+                async def _background_stats_update_record():
+                    try:
+                        if action_type in ['start_session', 'new_session']:
+                            await self.stats_repo.increment_session_count(user_id)
+                        elif action_type in ['send_message', 'text_message', 'image_message']:
+                            await self.stats_repo.increment_message_count(user_id)
+                        else:
+                            await self.stats_repo.update_last_active_time(user_id)
+                    except Exception as bg_err:
+                        self.logger.error(f"记录行为后更新统计失败(后台): {bg_err}")
+
+                try:
+                    asyncio.create_task(_background_stats_update_record())
+                except Exception as schedule_err:
+                    self.logger.error(f"调度记录行为统计后台任务失败: {schedule_err}")
                 
                 self.logger.info(f"用户行为记录成功: action_type={action_type}, user_id={user_id}")
                 return action_record

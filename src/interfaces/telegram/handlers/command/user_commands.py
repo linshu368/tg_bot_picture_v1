@@ -6,6 +6,7 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
+import asyncio
 
 from .base_command_handler import BaseCommandHandler, safe_command_handler
 from ...ui_handler import escape_markdown
@@ -43,16 +44,25 @@ class UserCommandHandler(BaseCommandHandler):
         )
         
         if registered_user:
-            # 创建会话
-            session = await self.session_service.get_or_create_session(registered_user['id'])
-            if session:
-                # 记录用户行为：启动bot
-                await self.action_record_service.record_action(
-                    user_id=registered_user['id'],
-                    session_id=session['session_id'],
-                    action_type='start_command',
-                    message_context='用户执行/start命令'
-                )
+            # 会话创建与行为记录放后台，避免阻塞首条欢迎消息
+            async def _background_start_side_effects(user_id: int):
+                try:
+                    session_inner = await self.session_service.get_or_create_session(user_id)
+                    if not session_inner:
+                        return
+                    await self.action_record_service.record_action(
+                        user_id=user_id,
+                        session_id=session_inner['session_id'],
+                        action_type='start_command',
+                        message_context='用户执行/start命令'
+                    )
+                except Exception as e:
+                    self.logger.error(f"/start 副作用失败(后台): {e}")
+
+            try:
+                asyncio.create_task(_background_start_side_effects(registered_user['id']))
+            except Exception as e:
+                self.logger.error(f"调度 /start 副作用后台任务失败: {e}")
             
             welcome_message = (
                 f"🎉 **欢迎来到AI图像处理bot！**\n\n"

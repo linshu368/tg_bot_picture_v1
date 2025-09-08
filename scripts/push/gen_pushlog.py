@@ -5,7 +5,8 @@ from pathlib import Path
 root_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
 from gpt.utils.direct_api import gptCaller
-from gpt.param import commit_process_diff_prompt_template
+from gpt.param import commit_process_diff_prompt_template 
+from gpt.param import push_log_title_prompt_template
 
 
 def build_prompt(config_path: str, diff_content: str) -> str:
@@ -50,7 +51,7 @@ def collect_commit_diffs(commits):
     """收集所有 commit 的 diff 内容"""
     diff_content = ""
     for cid in commits:
-        path = f"logs/snapshots/{cid}.json"
+        path = str(root_path / f"logs/snapshots/{cid}.json")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 commit_data = json.load(f)
@@ -79,7 +80,7 @@ push_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 # 读取 commitlog
 commitlogs = []
 for cid in commits:
-    path = f"logs/snapshots/{cid}.json"
+    path = str(root_path / f"logs/snapshots/{cid}.json")
     if os.path.exists(path):
         with open(path) as f:
             commitlogs.append(json.load(f))
@@ -97,7 +98,7 @@ try:
     md = gpt.get_response(prompt)
     message = md
 except Exception as e:
-    # fallback：若有可用 commitlogs，则拼接其 message（兼容老格式）
+   
     if commitlogs:
         # commitlogs 里历史可能是对象或字符串，这里做兼容
         parts = []
@@ -111,6 +112,16 @@ except Exception as e:
     else:
         message = "push update\nno commitlogs found"
 
+# 🔹 第二次调用 GPT，生成 pushlog 目录名
+try:
+    filename_prompt = push_log_title_prompt_template.replace("{commit_message}", message)
+    dir_name = gpt.get_response(filename_prompt).strip()
+    # 防御：替换非法路径字符
+    dir_name = "".join(c for c in dir_name if c not in r"\/:*?\"<>|")
+except Exception:
+    dir_name = "未命名改动"
+
+
 # pushlog 对象
 pushlog = {
     "push_id": push_id,
@@ -118,11 +129,17 @@ pushlog = {
     "branch": args.branch,
     "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S %z"),
     "commits": commits,
-    "message": message
+    "message": message,
+    "dir_name": dir_name
 }
 
-# 写入 pushlog 目录
-push_dir = f"logs/pushlogs/{push_id}"
+# 写入 pushlog 目录（目录名 = dir_name + date[YYYYMMDD]，date取自 pushlog["date"]）
+date_str = pushlog["date"].strip()
+try:
+    dir_date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").strftime("%Y%m%d")
+except Exception:
+    dir_date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d")
+push_dir = str(root_path / f"logs/pushlogs/{dir_name}_{dir_date}")
 os.makedirs(f"{push_dir}/commits", exist_ok=True)
 
 with open(f"{push_dir}/push_log.json", "w") as f:
@@ -130,7 +147,7 @@ with open(f"{push_dir}/push_log.json", "w") as f:
 
 # 迁移 commitlog
 for cid in commits:
-    src = f"logs/snapshots/{cid}.json"
+    src = str(root_path / f"logs/snapshots/{cid}.json")
     dst = f"{push_dir}/commits/{cid}.json"
     if os.path.exists(src):
         os.rename(src, dst)

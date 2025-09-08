@@ -4,6 +4,7 @@
 """
 
 import logging
+import asyncio
 from typing import Dict, Any, Optional
 
 from telegram import Update
@@ -41,18 +42,28 @@ class MessageHandler:
         user = update.effective_user
         
         try:
-            # 获取或创建用户会话
-            user_data = await self._safe_get_user(user.id)
-            if user_data:
-                session = await self.session_service.get_or_create_session(user_data['id'])
-                if session:
-                    # 记录用户行为：发送图片
+            # 获取或创建用户会话与行为记录放后台，避免阻塞首响
+            async def _background_photo_side_effects(telegram_user_id: int):
+                try:
+                    user_data_inner = await self._safe_get_user(telegram_user_id)
+                    if not user_data_inner:
+                        return
+                    session_inner = await self.session_service.get_or_create_session(user_data_inner['id'])
+                    if not session_inner:
+                        return
                     await self.action_record_service.record_action(
-                        user_id=user_data['id'],
-                        session_id=session['session_id'],
+                        user_id=user_data_inner['id'],
+                        session_id=session_inner['session_id'],
                         action_type='send_photo',
                         message_context='用户发送图片消息'
                     )
+                except Exception as e:
+                    self.logger.error(f"照片消息副作用失败(后台): {e}")
+
+            try:
+                asyncio.create_task(_background_photo_side_effects(user.id))
+            except Exception as e:
+                self.logger.error(f"调度照片副作用后台任务失败: {e}")
             
             # 获取用户信息
             user_data = await self._safe_get_user(user.id)
@@ -83,18 +94,29 @@ class MessageHandler:
         user = update.effective_user
         
         try:
-            # 获取用户信息并管理会话
-            user_data = await self._safe_get_user(user.id)
-            if user_data:
-                session = await self.session_service.get_or_create_session(user_data['id'])
-                if session:
-                    # 记录用户行为：发送文本消息
+            # 会话创建与行为记录放后台，避免阻塞首响
+            async def _background_text_side_effects(telegram_user_id: int, preview_text: str):
+                try:
+                    user_data_inner = await self._safe_get_user(telegram_user_id)
+                    if not user_data_inner:
+                        return
+                    session_inner = await self.session_service.get_or_create_session(user_data_inner['id'])
+                    if not session_inner:
+                        return
+                    short = preview_text[:50] + '...' if len(preview_text) > 50 else preview_text
                     await self.action_record_service.record_action(
-                        user_id=user_data['id'],
-                        session_id=session['session_id'],
+                        user_id=user_data_inner['id'],
+                        session_id=session_inner['session_id'],
                         action_type='send_text',
-                        message_context=f'用户发送文本: {text[:50]}...' if len(text) > 50 else f'用户发送文本: {text}'
+                        message_context=f'用户发送文本: {short}'
                     )
+                except Exception as e:
+                    self.logger.error(f"文本消息副作用失败(后台): {e}")
+
+            try:
+                asyncio.create_task(_background_text_side_effects(user.id, text))
+            except Exception as e:
+                self.logger.error(f"调度文本副作用后台任务失败: {e}")
             
             # 检查用户状态 - 如果正在等待UID输入
             current_state = self.state_manager.get_current_state(user.id)

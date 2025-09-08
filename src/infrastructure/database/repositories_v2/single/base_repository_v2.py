@@ -5,6 +5,7 @@ Supabase基础Repository V2抽象类
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, TypeVar, Generic
+import asyncio
 import logging
 from datetime import datetime
 
@@ -92,7 +93,7 @@ class BaseRepositoryV2(ABC, Generic[T]):
                 # 只有offset，使用range从offset开始到一个大数
                 query = query.range(offset, offset + 999)  # 假设最多返回1000条
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -174,7 +175,9 @@ class BaseRepositoryV2(ABC, Generic[T]):
             client = self.get_client()
             prepared_data = [self._prepare_data_for_insert(data) for data in data_list]
             
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data:
                 self.logger.info(f"批量插入成功: {len(result.data)} 条记录")
@@ -194,7 +197,7 @@ class BaseRepositoryV2(ABC, Generic[T]):
             query = client.table(self.table_name).select('*', count='exact')
             query = self._build_supabase_filters(query, conditions)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.count if result.count is not None else 0
             
         except Exception as e:
@@ -209,7 +212,7 @@ class BaseRepositoryV2(ABC, Generic[T]):
             query = self._build_supabase_filters(query, conditions)
             query = query.order(order_by, desc=True).limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -234,7 +237,9 @@ class BaseRepositoryV2(ABC, Generic[T]):
         """硬删除记录（物理删除）"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).delete().eq('id', id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).delete().eq('id', id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"记录物理删除成功: id={id}")

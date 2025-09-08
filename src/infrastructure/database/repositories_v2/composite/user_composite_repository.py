@@ -10,6 +10,7 @@
 """
 
 import logging
+import asyncio
 import uuid
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, date
@@ -83,21 +84,17 @@ class UserCompositeRepository:
                 user_id = user['id']
                 rollback_actions.append(lambda: self.user_repo.delete(user_id))
                 
-                # 2. 初始化用户钱包
+                # 2/3. 并发初始化钱包与统计
                 default_points = data.get('default_credits', DEFAULT_CREDITS)
+                current_time = datetime.utcnow().isoformat()
                 wallet_data = {
                     'user_id': user_id,
-                    'points': default_points,  # 使用新的字段名
+                    'points': default_points,
                     'first_add': False,
                     'total_paid_amount': 0.0,
                     'total_points_spent': 0,
                     'level': DEFAULT_USER_LEVEL
                 }
-                wallet = await self.wallet_repo.create(wallet_data)
-                rollback_actions.append(lambda: self.wallet_repo.delete_by_user_id(user_id))
-                
-                # 3. 初始化活动统计
-                current_time = datetime.utcnow().isoformat()
                 stats_data = {
                     'user_id': user_id,
                     'session_count': 0,
@@ -105,24 +102,36 @@ class UserCompositeRepository:
                     'first_active_time': current_time,
                     'last_active_time': current_time
                 }
-                stats = await self.stats_repo.create(stats_data)
+                wallet, stats = await asyncio.gather(
+                    self.wallet_repo.create(wallet_data),
+                    self.stats_repo.create(stats_data)
+                )
+                rollback_actions.append(lambda: self.wallet_repo.delete_by_user_id(user_id))
                 rollback_actions.append(lambda: self.stats_repo.delete_by_user_id(user_id))
                 
-                # 4. 注册积分流水
+                # 4. 积分流水（与上一步无强依赖，可并发触发，但不阻塞返回）
                 if default_points > 0:
-                    point_record_data = {
-                        'user_id': user_id,
-                        'points_change': default_points,  # 使用新的字段名
-                        'action_type': 'registration',
-                        'description': '新用户注册奖励',
-                        'points_balance': default_points,  # 使用新的字段名
-                        'related_event_id': str(uuid.uuid4())
-                    }
-                    await self.point_repo.create(point_record_data)
+                    async def _background_registration_points():
+                        try:
+                            point_record_data = {
+                                'user_id': user_id,
+                                'points_change': default_points,
+                                'action_type': 'registration',
+                                'description': '新用户注册奖励',
+                                'points_balance': default_points,
+                                'related_event_id': str(uuid.uuid4())
+                            }
+                            await self.point_repo.create(point_record_data)
+                        except Exception as bg_err:
+                            self.logger.error(f"注册积分流水记录失败(后台): {bg_err}")
+                    try:
+                        asyncio.create_task(_background_registration_points())
+                    except Exception as schedule_err:
+                        self.logger.error(f"调度注册积分流水后台任务失败: {schedule_err}")
                 
                 user_result = {
                     **user,
-                    'points': wallet['points'],  # 直接使用新的字段名
+                    'points': wallet['points'],
                     'level': wallet['level'],
                     'session_count': 0,
                     'total_messages_sent': 0
@@ -220,13 +229,13 @@ class UserCompositeRepository:
             return False
     
     async def daily_checkin(self, user_id: int) -> Dict[str, Any]:
-        """用户每日签到"""
+        """用户每日签到（优化版：先返回，再异步处理积分流水）"""
         today = date.today()
         try:
             existing = await self.checkin_repo.get_by_user_id_and_date(user_id, today)
             if existing:
                 return self._standardize_error_response(False, "今日已签到")
-            
+
             async with self._transaction() as rollback_actions:
                 # 1. 记录签到
                 checkin = await self.checkin_repo.create({
@@ -235,35 +244,46 @@ class UserCompositeRepository:
                     'points_earned': DAILY_SIGNIN_REWARD
                 })
                 rollback_actions.append(lambda: self.checkin_repo.delete(checkin['id']))
-                
-                # 2. 增加钱包积分 - 修复方法名
+
+                # 2. 增加钱包积分
                 success = await self.wallet_repo.add_points(user_id, DAILY_SIGNIN_REWARD)
                 if not success:
                     raise Exception("增加钱包积分失败")
-                
+
                 # 获取更新后的钱包信息
                 wallet = await self.wallet_repo.get_by_user_id(user_id)
                 if not wallet:
                     raise Exception("获取更新后的钱包信息失败")
-                
-                # 3. 创建积分流水
-                await self.point_repo.create({
-                    'user_id': user_id,
-                    'points_change': DAILY_SIGNIN_REWARD,  # 使用新的字段名
-                    'action_type': 'daily_checkin',
-                    'description': '每日签到奖励',
-                    'points_balance': wallet['points'],  # 使用新的字段名
-                    'related_event_id': str(uuid.uuid4())  # 生成真正的UUID而不是使用checkin id
-                })
-                
+
+                # === 3. 积分流水改为后台异步执行 ===
+                async def _background_point_record():
+                    try:
+                        await self.point_repo.create({
+                            'user_id': user_id,
+                            'points_change': DAILY_SIGNIN_REWARD,
+                            'action_type': 'daily_checkin',
+                            'description': '每日签到奖励',
+                            'points_balance': wallet['points'],
+                            'related_event_id': str(uuid.uuid4())
+                        })
+                    except Exception as bg_err:
+                        self.logger.error(f"每日签到积分流水记录失败(后台): {bg_err}")
+
+                try:
+                    asyncio.create_task(_background_point_record())
+                except Exception as schedule_err:
+                    self.logger.error(f"调度每日签到积分流水后台任务失败: {schedule_err}")
+
+                # 立刻返回用户需要的结果
                 return self._standardize_error_response(True, "签到成功", {
                     'user_id': user_id,
                     'points_awarded': DAILY_SIGNIN_REWARD,
-                    'total_points': wallet['points']  # 使用新的字段名
+                    'total_points': wallet['points']
                 })
         except Exception as e:
             self.logger.error(f"用户签到失败: {e}")
             return self._standardize_error_response(False, "签到失败")
+
     
     async def get_user_profile(self, user_id: int) -> Optional[Dict[str, Any]]:
         """获取用户完整档案信息"""
