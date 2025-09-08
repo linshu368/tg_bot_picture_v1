@@ -31,16 +31,20 @@ fi
 OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
   --prompt "$CONFIG" --diff "$DIFF_FILE")"
 
-# 用 jq 提取 commit message 部分
-title="$(echo "$OUT_JSON" | jq -r '.message.title')"
-body="$(echo "$OUT_JSON" | jq -r '.message.body')"
+# 用 jq 提取 commit message 部分（暂时注释，改为直接使用原始返回）
+# title="$(echo "$OUT_JSON" | jq -r '.message.title')"
+# body="$(echo "$OUT_JSON" | jq -r '.message.body')"
 
-# 写入最终 commit message
+# 直接使用 AI 原始返回的 message
+raw_message="$(echo "$OUT_JSON" | jq -r '.message')"
+
+# 将原始返回写入最终 commit message，并在控制台打印
 {
-  echo "$title"
-  echo
-  echo "$body"
+  echo "$raw_message"
 } > "$COMMIT_MSG_FILE"
+
+echo "AI raw message:"
+echo "$raw_message"
 
 # 保存完整 JSON 快照（gen_commit_msg.py 里已经保存过，这里可选）
 SNAPSHOT_DIR="$REPO_ROOT/logs/snapshots"

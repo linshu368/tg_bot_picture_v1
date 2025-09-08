@@ -27,23 +27,23 @@ def build_prompt(config_path: str, diff_content: str) -> str:
     return prompt
 
 
-def parse_response(md: str):
-    """解析 AI 返回的 markdown，提取 title + body"""
-    lines = [l.strip() for l in md.splitlines() if l.strip()]
-    title = ""
-    body_lines = []
+# def parse_response(md: str):
+#     """解析 AI 返回的 markdown，提取 title + body"""
+#     lines = [l.strip() for l in md.splitlines() if l.strip()]
+#     title = ""
+#     body_lines = []
 
-    for i, line in enumerate(lines):
-        if line.startswith("# "):
-            title = line[2:].strip()
-            body_lines = lines[i + 1 :]
-            break
+#     for i, line in enumerate(lines):
+#         if line.startswith("# "):
+#             title = line[2:].strip()
+#             body_lines = lines[i + 1 :]
+#             break
 
-    if not title and lines:
-        title = lines[0]
-        body_lines = lines[1:]
+#     if not title and lines:
+#         title = lines[0]
+#         body_lines = lines[1:]
 
-    return title, "\n".join(body_lines).strip()
+#     return title, "\n".join(body_lines).strip()
 
 
 def collect_commit_diffs(commits):
@@ -91,23 +91,25 @@ diff_content = collect_commit_diffs(commits)
 # 构造 prompt
 prompt = build_prompt(args.prompt, diff_content)
 
-# 调用 GPT
+# 调用 GPT（直接使用原始 Markdown 作为 message）
 gpt = gptCaller()
 try:
     md = gpt.get_response(prompt)
-    title, body = parse_response(md)
+    message = md
 except Exception as e:
-    # fallback 到原来的逻辑
+    # fallback：若有可用 commitlogs，则拼接其 message（兼容老格式）
     if commitlogs:
-        title = commitlogs[-1]["message"]["title"]
-        body = "\n".join([c["message"]["title"] for c in commitlogs])
+        # commitlogs 里历史可能是对象或字符串，这里做兼容
+        parts = []
+        for c in commitlogs:
+            m = c.get("message")
+            if isinstance(m, dict):
+                parts.append(m.get("title") or "")
+            elif isinstance(m, str):
+                parts.append(m)
+        message = "\n".join([p for p in parts if p]) or "> fallback: no titles found"
     else:
-        title, body = "push update", "no commitlogs found"
-
-message = {
-    "title": title,
-    "body": body
-}
+        message = "push update\nno commitlogs found"
 
 # pushlog 对象
 pushlog = {

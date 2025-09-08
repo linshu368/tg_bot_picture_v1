@@ -18,17 +18,7 @@
    `<type>(<scope>): <subject-中文简述，不超过60字>`  
    - type 必须是：feat / fix / docs / refactor / perf / test / chore  
    - scope 从参考范围里选择，或者合理推断  
-   - 如果是 pushlog（多个 diff 汇总），请综合所有改动生成一个「阶段性 super_title」  
 2. 给出 3-6 条要点（中文，短句，聚焦影响面与风险）  
-3. 如涉及数据库/接口变更，补充“回滚注意事项”，否则写“无”  
-4. 额外输出一个 `super_title` 字段：  
-   - commitlog 场景：等同于 `title`（对单次 diff 的总结）  
-   - pushlog 场景：基于要点总结，提炼一个阶段性 super_title，能概括所有改动  
+3. 如涉及数据库/接口变更，补充“回滚注意事项”，否则写“无”   
 
-请严格按以下 Markdown 格式输出：
-# title
-- point1
-- point2
-...
-> rollback: ...
-> super_title: ...
+

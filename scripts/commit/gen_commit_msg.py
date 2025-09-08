@@ -37,23 +37,23 @@ def build_prompt(config_path: str, diff_file: str) -> str:
     return prompt
 
 
-def parse_response(md: str):
-    """解析 AI 返回的 markdown，提取 title + body"""
-    lines = [l.strip() for l in md.splitlines() if l.strip()]
-    title = ""
-    body_lines = []
+# def parse_response(md: str):
+#     """解析 AI 返回的 markdown，提取 title + body"""
+#     lines = [l.strip() for l in md.splitlines() if l.strip()]
+#     title = ""
+#     body_lines = []
 
-    for i, line in enumerate(lines):
-        if line.startswith("# "):
-            title = line[2:].strip()
-            body_lines = lines[i + 1 :]
-            break
+#     for i, line in enumerate(lines):
+#         if line.startswith("# "):
+#             title = line[2:].strip()
+#             body_lines = lines[i + 1 :]
+#             break
 
-    if not title and lines:
-        title = lines[0]
-        body_lines = lines[1:]
+#     if not title and lines:
+#         title = lines[0]
+#         body_lines = lines[1:]
 
-    return title, "\n".join(body_lines).strip()
+#     return title, "\n".join(body_lines).strip()
 
 
 def get_git_metadata():
@@ -75,28 +75,23 @@ def main():
     # 构造 prompt
     prompt = build_prompt(args.prompt, args.diff)
 
-    # 调用 GPT
+    # 调用 GPT（直接使用原始 Markdown 作为 message）
     gpt = gptCaller()
     try:
         md = gpt.get_response(prompt)
+        message = md
     except Exception as e:
-        title = "chore(core): update"
-        body = f"> AI 生成失败: {str(e)}"
-    else:
-        title, body = parse_response(md)
+        message = f"> AI 生成失败: {str(e)}"
 
     # 获取 commit 元数据
     commit_id, author, date = get_git_metadata()
 
-    # 组装完整日志
+    # 组装完整日志（message 为原始 Markdown 字符串）
     commit_log = {
         "commit_id": commit_id,
         "author": author,
         "date": date,
-        "message": {
-            "title": title,
-            "body": body
-        }
+        "message": message
     }
 
     # 输出 JSON（给 commit_msg.sh 用）- 使用缩进便于可读
