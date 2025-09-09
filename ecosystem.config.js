@@ -3,8 +3,8 @@ module.exports = {
     {
       name: 'tg-bot-picture',
       script: 'main.py',                                 // 直接运行入口文件
-      interpreter: '/home/tg_bot_picture_v1/venv/bin/python3', // 固定到同一 venv
-      cwd: '/home/tg_bot_picture_v1',                    // 项目根目录（.env 在这）
+      interpreter: '/Users/qj/python_project/tg_bot_picture_v1/venv/bin/python3', // 固定到同一 venv
+      cwd: '/Users/qj/python_project/tg_bot_picture_v1',                    // 项目根目录（.env 在这）
       instances: 1,                                      // 单实例，避免端口冲突
       exec_mode: 'fork',
       autorestart: true,
@@ -14,8 +14,8 @@ module.exports = {
         PYTHONUNBUFFERED: '1'                            // 立刻刷日志
         // 如需强制覆盖端口，也可在此放 PAYMENT_PORT/IMAGE_PORT
       },
-      out_file: '/home/tg_bot_picture_v1/logs/pm2-out.log',
-      error_file: '/home/tg_bot_picture_v1/logs/pm2-error.log',
+      out_file: '/Users/qj/python_project/tg_bot_picture_v1/logs/pm2-out.log',
+      error_file: '/Users/qj/python_project/tg_bot_picture_v1/logs/pm2-error.log',
       merge_logs: true,
       time: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',

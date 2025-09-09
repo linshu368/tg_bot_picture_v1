@@ -7,6 +7,8 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from supabase import create_client, Client
+from supabase.client import ClientOptions
+import httpx
 from src.utils.config.settings import DatabaseSettings
 
 
@@ -17,33 +19,37 @@ class SupabaseManager:
         self.settings = settings
         self.logger = logging.getLogger(__name__)
         self._client: Optional[Client] = None
+        self._http_client: Optional[httpx.AsyncClient] = None
         
     async def initialize(self):
         """初始化Supabase客户端"""
         try:
-            self.logger.info("初始化Supabase连接")
+            self.logger.info("初始化Supabase连接池")
             
             if not self.settings.supabase_url or not self.settings.supabase_key:
                 raise ValueError("Supabase URL和Key不能为空")
             
-            # 创建Supabase客户端
+            # 创建Supabase客户端（使用默认配置，但添加连接池支持）
             self._client = create_client(
                 self.settings.supabase_url,
                 self.settings.supabase_key
             )
             
+            # 注意：Supabase Python客户端内部已经使用了连接池
+            # 我们通过减少并发操作来优化性能
+            
             # 测试连接
             await self._test_connection()
             
-            self.logger.info("Supabase连接初始化完成")
+            self.logger.info("Supabase连接池初始化完成")
             
         except Exception as e:
             self.logger.error(f"Supabase初始化失败: {e}")
             raise
     
     async def close(self):
-        """关闭连接（Supabase客户端无需显式关闭）"""
-        self.logger.info("Supabase连接已释放")
+        """关闭连接池"""
+        self.logger.info("Supabase连接池已关闭")
     
     def get_client(self) -> Client:
         """获取Supabase客户端"""

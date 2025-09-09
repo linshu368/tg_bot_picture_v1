@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 
 from src.infrastructure.messaging.webhook_handler import WebhookHandler, WebhookProcessor
+from src.utils.performance_monitor import get_performance_monitor
 
 
 class ImageWebhookHandler:
@@ -81,24 +82,34 @@ class ImageWebhookHandler:
     
     def handle_image_process_callback(self) -> str:
         """处理图片处理回调 - multipart/form-data"""
+        monitor = get_performance_monitor()
+        operation_id = f"webhook_image_{int(time.time())}"
+        monitor.start_timer(operation_id, "收到图片处理webhook回调")
+        
         try:
             # 获取表单数据和文件
+            monitor.checkpoint(operation_id, "parse_request", "解析请求数据")
             callback_data = request.form.to_dict()
             files = request.files.to_dict() if request.files else {}
             
             self.logger.info(f"收到图片处理回调: 数据={callback_data}, 文件数={len(files)}")
             
             # 验证基础字段
+            monitor.checkpoint(operation_id, "validate_data", "验证回调数据")
             if 'id_gen' not in callback_data:
+                monitor.end_timer(operation_id, "缺少id_gen字段，快速结束")
                 self.logger.error("图片处理回调缺少id_gen字段")
                 return "fail"
             
             # 异步处理回调
+            monitor.checkpoint(operation_id, "async_process", "开始异步处理回调")
             self.process_callback_async("image", callback_data, files)
             
+            monitor.end_timer(operation_id, "图片处理webhook回调处理完成")
             return "success"
                 
         except Exception as e:
+            monitor.end_timer(operation_id, f"图片处理webhook回调异常: {str(e)}")
             self.logger.error(f"处理图片处理回调异常: {e}")
             return "fail"
     

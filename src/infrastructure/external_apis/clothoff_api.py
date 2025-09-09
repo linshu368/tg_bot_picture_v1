@@ -6,11 +6,13 @@ ClothOff API 重构版 - 外部图像处理API接口
 import logging
 import uuid
 import asyncio
+import time
 from typing import Dict, Any, Optional, BinaryIO
 from datetime import datetime
 import aiohttp
 
 from src.domain.services.image_service import ImageGenerationParams
+from src.utils.performance_monitor import get_performance_monitor
 
 
 class APIError(Exception):
@@ -79,11 +81,16 @@ class ClothoffAPIClient:
         Returns:
             API响应结果
         """
+        monitor = get_performance_monitor()
+        operation_id = f"clothoff_api_{task_id or 'unknown'}_{int(time.time())}"
+        monitor.start_timer(operation_id, f"ClothOff API调用 - 任务ID: {task_id}")
+        
         try:
             if not task_id:
                 task_id = str(uuid.uuid4())
             
             # 构建请求数据
+            monitor.checkpoint(operation_id, "build_request", "构建请求数据")
             webhook_url = self._build_webhook_url("image-process")
             
             # 准备表单数据
@@ -115,16 +122,21 @@ class ClothoffAPIClient:
             self.logger.debug(f"参数: {params.to_dict()}")
             
             # 发送请求
+            monitor.checkpoint(operation_id, "send_request", "开始发送HTTP请求")
             async with await self._create_session() as session:
                 async with session.post(self.api_url, data=form_data) as response:
                     response_text = await response.text()
                     
                     self.logger.info(f"API响应状态码: {response.status}")
+                    monitor.checkpoint(operation_id, "receive_response", f"收到API响应: {response.status}")
                     
                     if response.status == 200:
                         try:
+                            monitor.checkpoint(operation_id, "parse_response", "开始解析API响应")
                             result = await response.json()
                             self.logger.info(f"任务提交成功 - 队列位置: {result.get('queue_num', 'N/A')}")
+                            
+                            monitor.end_timer(operation_id, f"ClothOff API调用成功 - 队列位置: {result.get('queue_num', 'N/A')}")
                             
                             return {
                                 'success': True,
@@ -134,16 +146,20 @@ class ClothoffAPIClient:
                                 'response': result
                             }
                         except Exception as e:
+                            monitor.end_timer(operation_id, f"ClothOff API响应解析失败: {str(e)}")
                             self.logger.error(f"解析API响应失败: {e}")
                             raise APIResponseError(f"响应解析错误: {e}")
                     else:
+                        monitor.end_timer(operation_id, f"ClothOff API请求失败: {response.status}")
                         self.logger.error(f"API请求失败: {response.status} - {response_text}")
                         raise APIResponseError(f"API返回错误: {response.status}")
                         
         except asyncio.TimeoutError:
+            monitor.end_timer(operation_id, f"ClothOff API请求超时: {task_id}")
             self.logger.error(f"API请求超时: {task_id}")
             raise APITimeoutError("API请求超时")
         except Exception as e:
+            monitor.end_timer(operation_id, f"ClothOff API请求异常: {str(e)}")
             self.logger.error(f"图像去衣请求失败: {e}")
             raise APIError(f"请求失败: {str(e)}")
     

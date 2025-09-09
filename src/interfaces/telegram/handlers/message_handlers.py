@@ -5,6 +5,7 @@
 
 import logging
 import asyncio
+import time
 from typing import Dict, Any, Optional
 
 from telegram import Update
@@ -17,6 +18,7 @@ from src.utils.config.app_config import (
     COST_QUICK_UNDRESS, COST_CUSTOM_UNDRESS, QUICK_UNDRESS_DEFAULTS, 
     UID_PREFIX, UID_LENGTH
 )
+from src.utils.performance_monitor import get_performance_monitor
 
 
 class MessageHandler:
@@ -40,6 +42,11 @@ class MessageHandler:
     async def handle_photo_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理图片消息"""
         user = update.effective_user
+        monitor = get_performance_monitor()
+        
+        # 开始图片处理计时
+        operation_id = f"photo_message_{user.id}_{int(time.time())}"
+        monitor.start_timer(operation_id, f"用户 {user.id} 发送图片消息")
         
         try:
             # 获取或创建用户会话与行为记录放后台，避免阻塞首响
@@ -65,26 +72,39 @@ class MessageHandler:
             except Exception as e:
                 self.logger.error(f"调度照片副作用后台任务失败: {e}")
             
+            monitor.checkpoint(operation_id, "background_tasks", "后台任务调度完成")
+            
             # 获取用户信息
+            monitor.checkpoint(operation_id, "get_user", "开始获取用户信息")
             user_data = await self._safe_get_user(user.id)
             if not user_data:
+                monitor.end_timer(operation_id, "用户不存在，快速结束")
                 await update.message.reply_text("❌ 用户不存在，请先使用 /start")
                 return
             
             # 获取图片
+            monitor.checkpoint(operation_id, "get_photo", "获取图片信息")
             photo = update.message.photo[-1]  # 获取最高质量的图片
             current_state = self.state_manager.get_current_state(user.id)
             
+            monitor.checkpoint(operation_id, "check_state", f"检查用户状态: {current_state}")
+            
             # 根据当前状态处理图片
             if current_state == States.QUICK_UNDRESS_WAITING_PHOTO:
+                monitor.checkpoint(operation_id, "quick_undress_photo", "处理快速去衣图片")
                 await self._handle_quick_undress_photo(update, context, photo)
             elif current_state == States.CUSTOM_UNDRESS_WAITING_PHOTO:
+                monitor.checkpoint(operation_id, "custom_undress_photo", "处理自定义去衣图片")
                 await self._handle_custom_undress_photo(update, context, photo)
             else:
                 # 默认显示功能选择
+                monitor.checkpoint(operation_id, "function_selection", "显示功能选择")
                 await self._show_function_selection(update, context, photo)
             
+            monitor.end_timer(operation_id, "图片消息处理完成")
+            
         except Exception as e:
+            monitor.end_timer(operation_id, f"图片消息处理异常: {str(e)}")
             self.logger.error(f"处理图片消息失败: {e}")
             await update.message.reply_text("❌ 处理图片时出错，请稍后重试")
 
@@ -94,6 +114,13 @@ class MessageHandler:
         user = update.effective_user
         
         try:
+            # 检查是否是按钮文本（避免重复处理）
+            button_texts = ["👕 快速去衣", "🎨 自定义去衣", "💳 充值积分", "👤 个人中心", "🎁 每日签到", "🔁 找回账号", "❓ 帮助"]
+            if text in button_texts:
+                # 按钮文本直接处理，不创建会话和行为记录
+                await self._handle_button_dispatch(update, context, text)
+                return
+            
             # 会话创建与行为记录放后台，避免阻塞首响
             async def _background_text_side_effects(telegram_user_id: int, preview_text: str):
                 try:
@@ -158,39 +185,55 @@ class MessageHandler:
 
     async def _handle_button_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
         """分发按钮处理，每个功能独立错误处理"""
-        
-        # 检查用户是否处于等待UID输入状态，如果点击的不是找回账号按钮，则清除该状态
-        # 这样用户可以正常使用其他功能，不会被卡在UID验证状态
         user_id = update.effective_user.id
+        monitor = get_performance_monitor()
+        
+        # 开始按钮处理计时
+        operation_id = f"button_click_{user_id}_{int(time.time())}"
+        monitor.start_timer(operation_id, f"用户 {user_id} 点击按钮: {text}")
+        
         try:
-            current_state = self.state_manager.get_current_state(user_id)
-            if current_state == "waiting_uid" and text != "🔁 找回账号":  # States.WAITING_UID_INPUT
-                self.logger.info(f"用户 {user_id} 正在等待UID输入，但点击了其他功能按钮 '{text}'，自动清除等待状态")
-                self.state_manager.reset_user_state(user_id)
-        except Exception as state_error:
-            self.logger.error(f"检查/清除用户状态失败: {state_error}")
-        
-        function_map = {
-            "👕 快速去衣": self._handle_quick_undress_button,
-            "🎨 自定义去衣": self._handle_custom_undress_button,
-            "💳 充值积分": self._handle_buy_button,
-            "👤 个人中心": self._handle_profile_button,
-            "🎁 每日签到": self._handle_checkin_button,
-            "🔁 找回账号": self._handle_recover_button,
-            "❓ 帮助": self._handle_help_button,
-        }
-        
-        if text in function_map:
-            await self._safe_handle_function(function_map[text], update, context)
-        else:
-            # 默认提示
-            await update.message.reply_text(
-                "💡 发送图片开始AI处理，或使用底部菜单功能：\n\n"
-                "🎨 /start - 显示主菜单\n"
-                "❓ /help - 查看帮助\n"
-                "💎 /points - 查看积分\n"
-                "🛒 /buy - 购买积分"
-            )
+            # 检查用户是否处于等待UID输入状态，如果点击的不是找回账号按钮，则清除该状态
+            # 这样用户可以正常使用其他功能，不会被卡在UID验证状态
+            try:
+                current_state = self.state_manager.get_current_state(user_id)
+                if current_state == "waiting_uid" and text != "🔁 找回账号":  # States.WAITING_UID_INPUT
+                    self.logger.info(f"用户 {user_id} 正在等待UID输入，但点击了其他功能按钮 '{text}'，自动清除等待状态")
+                    self.state_manager.reset_user_state(user_id)
+            except Exception as state_error:
+                self.logger.error(f"检查/清除用户状态失败: {state_error}")
+            
+            monitor.checkpoint(operation_id, "state_check", "用户状态检查完成")
+            
+            function_map = {
+                "👕 快速去衣": self._handle_quick_undress_button,
+                "🎨 自定义去衣": self._handle_custom_undress_button,
+                "💳 充值积分": self._handle_buy_button,
+                "👤 个人中心": self._handle_profile_button,
+                "🎁 每日签到": self._handle_checkin_button,
+                "🔁 找回账号": self._handle_recover_button,
+                "❓ 帮助": self._handle_help_button,
+            }
+            
+            if text in function_map:
+                monitor.checkpoint(operation_id, "function_dispatch", f"分发到函数: {function_map[text].__name__}")
+                await self._safe_handle_function(function_map[text], update, context)
+            else:
+                # 默认提示
+                monitor.checkpoint(operation_id, "default_response", "返回默认提示")
+                await update.message.reply_text(
+                    "💡 发送图片开始AI处理，或使用底部菜单功能：\n\n"
+                    "🎨 /start - 显示主菜单\n"
+                    "❓ /help - 查看帮助\n"
+                    "💎 /points - 查看积分\n"
+                    "🛒 /buy - 购买积分"
+                )
+            
+            monitor.end_timer(operation_id, f"按钮处理完成: {text}")
+            
+        except Exception as e:
+            monitor.end_timer(operation_id, f"按钮处理异常: {text}")
+            raise e
 
     async def _safe_handle_function(self, func, update, context, *args):
         """安全执行功能函数，提供独立的错误处理"""
@@ -256,38 +299,59 @@ class MessageHandler:
     async def _handle_quick_undress_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理快速脱衣按钮"""
         user = update.effective_user
+        monitor = get_performance_monitor()
         
-        user_data = await self.user_service.get_user_by_telegram_id(user.id)
-        if not user_data:
-            await update.message.reply_text("❌ 用户不存在，请先使用 /start")
-            return
+        # 开始快速去衣按钮处理计时
+        operation_id = f"quick_undress_button_{user.id}_{int(time.time())}"
+        monitor.start_timer(operation_id, f"用户 {user.id} 点击快速去衣按钮")
         
-        # 检查积分
-        points_balance = await self.user_service.get_user_points_balance(user_data['id'])
-        if points_balance < COST_QUICK_UNDRESS:
-            message = f"❌ 积分不足！\n\n快速脱衣需要：{COST_QUICK_UNDRESS}积分\n您当前积分：{points_balance}\n\n请先获取积分："
-            keyboard = self.ui_handler.create_insufficient_points_keyboard()
-            await update.message.reply_text(message, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-            return
-        
-        # 设置用户状态为等待上传图片
-        self.state_helper.start_quick_undress_flow(user.id)
-        
-        # 使用原始版本的消息格式
-        message = "👕 **快速脱衣**\n\n"
-        message += "最优秀最经典的呈现！\n\n"
-        message += "直接**上传图片**————建议上传站立，单人，无遮挡，主体人物清晰的照片 无奇怪动作姿势\n\n"
-        message += f"图片去衣：{COST_QUICK_UNDRESS}积分/图片\n\n"
-        message += "===================\n"
-        message += "注意事项：\n"
-        message += "1.使用我们的服务即表示您同意 用户协议且不得用于非法用途。\n"
-        message += "2.严禁输入未成年相关的任何图片。\n\n"
-        message += "24小时开放"
-        
-        await update.message.reply_text(
-            message,
-            parse_mode=ParseMode.MARKDOWN
-        )
+        try:
+            # 获取用户信息
+            monitor.checkpoint(operation_id, "get_user", "开始获取用户信息")
+            user_data = await self.user_service.get_user_by_telegram_id(user.id)
+            if not user_data:
+                monitor.end_timer(operation_id, "用户不存在，快速结束")
+                await update.message.reply_text("❌ 用户不存在，请先使用 /start")
+                return
+            
+            # 检查积分
+            monitor.checkpoint(operation_id, "check_points", "开始检查积分")
+            points_balance = await self.user_service.get_user_points_balance(user_data['id'])
+            if points_balance < COST_QUICK_UNDRESS:
+                monitor.end_timer(operation_id, "积分不足，快速结束")
+                message = f"❌ 积分不足！\n\n快速脱衣需要：{COST_QUICK_UNDRESS}积分\n您当前积分：{points_balance}\n\n请先获取积分："
+                keyboard = self.ui_handler.create_insufficient_points_keyboard()
+                await update.message.reply_text(message, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+                return
+            
+            # 设置用户状态为等待上传图片
+            monitor.checkpoint(operation_id, "set_state", "设置用户状态")
+            self.state_helper.start_quick_undress_flow(user.id)
+            
+            # 构建回复消息
+            monitor.checkpoint(operation_id, "build_message", "构建回复消息")
+            message = "👕 **快速脱衣**\n\n"
+            message += "最优秀最经典的呈现！\n\n"
+            message += "直接**上传图片**————建议上传站立，单人，无遮挡，主体人物清晰的照片 无奇怪动作姿势\n\n"
+            message += f"图片去衣：{COST_QUICK_UNDRESS}积分/图片\n\n"
+            message += "===================\n"
+            message += "注意事项：\n"
+            message += "1.使用我们的服务即表示您同意 用户协议且不得用于非法用途。\n"
+            message += "2.严禁输入未成年相关的任何图片。\n\n"
+            message += "24小时开放"
+            
+            # 发送回复
+            monitor.checkpoint(operation_id, "send_reply", "发送回复消息")
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            monitor.end_timer(operation_id, "快速去衣按钮处理完成")
+            
+        except Exception as e:
+            monitor.end_timer(operation_id, f"快速去衣按钮处理异常: {str(e)}")
+            raise e
 
     async def _handle_custom_undress_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理自定义脱衣按钮"""

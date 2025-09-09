@@ -1,6 +1,6 @@
 import argparse, json, os, datetime, yaml, sys
 from pathlib import Path
-
+import subprocess
 # 引入 gptCaller 与参数模板
 root_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
@@ -47,19 +47,10 @@ def build_prompt(config_path: str, diff_content: str) -> str:
 #     return title, "\n".join(body_lines).strip()
 
 
-def collect_commit_diffs(commits):
-    """收集所有 commit 的 diff 内容"""
-    diff_content = ""
-    for cid in commits:
-        path = str(root_path / f"logs/snapshots/{cid}.json")
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                commit_data = json.load(f)
-                # 假设 commit_data 中有 diff 字段，如果没有则跳过
-                if "diff" in commit_data:
-                    diff_content += f"\n=== Commit {cid} ===\n"
-                    diff_content += commit_data["diff"]
-                    diff_content += "\n"
+def collect_push_diff(remote: str, branch: str) -> str:
+    """获取本次 push 的整体 diff"""
+    rev_range = f"{remote}/{branch}..HEAD"
+    diff_content = subprocess.getoutput(f"git diff {rev_range}")
     return diff_content
 
 
@@ -78,43 +69,45 @@ if not commits:
 push_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 # 读取 commitlog
-commitlogs = []
-for cid in commits:
-    path = str(root_path / f"logs/snapshots/{cid}.json")
-    if os.path.exists(path):
-        with open(path) as f:
-            commitlogs.append(json.load(f))
+# commitlogs = []
+# for cid in commits:
+#     path = str(root_path / f"logs/snapshots/{cid}.json")
+#     if os.path.exists(path):
+#         with open(path) as f:
+#             commitlogs.append(json.load(f))
 
 # 🔹 AI 生成 message
-# 收集所有 commit 的 diff 内容
-diff_content = collect_commit_diffs(commits)
+# 收集本次push 的 diff 内容
+diff_content = collect_push_diff(args.remote, args.branch)
 
 # 构造 prompt
 prompt = build_prompt(args.prompt, diff_content)
 
 # 调用 GPT（直接使用原始 Markdown 作为 message）
 gpt = gptCaller()
+
+# gpt_4o_mini = gptCaller(model="gpt-4o-mini")
 try:
     md = gpt.get_response(prompt)
     message = md
 except Exception as e:
    
-    if commitlogs:
-        # commitlogs 里历史可能是对象或字符串，这里做兼容
-        parts = []
-        for c in commitlogs:
-            m = c.get("message")
-            if isinstance(m, dict):
-                parts.append(m.get("title") or "")
-            elif isinstance(m, str):
-                parts.append(m)
-        message = "\n".join([p for p in parts if p]) or "> fallback: no titles found"
-    else:
+    # if commitlogs:
+    #     # commitlogs 里历史可能是对象或字符串，这里做兼容
+    #     parts = []
+    #     for c in commitlogs:
+    #         m = c.get("message")
+    #         if isinstance(m, dict):
+    #             parts.append(m.get("title") or "")
+    #         elif isinstance(m, str):
+    #             parts.append(m)
+    #     message = "\n".join([p for p in parts if p]) or "> fallback: no titles found"
+    # else:
         message = "push update\nno commitlogs found"
 
 # 🔹 第二次调用 GPT，生成 pushlog 目录名
 try:
-    filename_prompt = push_log_title_prompt_template.replace("{commit_message}", message)
+    filename_prompt = push_log_title_prompt_template.replace("{message}", message)
     dir_name = gpt.get_response(filename_prompt).strip()
     # 防御：替换非法路径字符
     dir_name = "".join(c for c in dir_name if c not in r"\/:*?\"<>|")
@@ -145,9 +138,15 @@ os.makedirs(f"{push_dir}/commits", exist_ok=True)
 with open(f"{push_dir}/push_log.json", "w") as f:
     json.dump(pushlog, f, indent=2, ensure_ascii=False)
 
-# 迁移 commitlog
-for cid in commits:
-    src = str(root_path / f"logs/snapshots/{cid}.json")
-    dst = f"{push_dir}/commits/{cid}.json"
-    if os.path.exists(src):
-        os.rename(src, dst)
+# 迁移当前 snapshots 目录下的所有 JSON 快照到本次 push 目录
+snap_dir = root_path / "logs" / "snapshots"
+if os.path.isdir(snap_dir):
+    for name in os.listdir(snap_dir):
+        if not name.endswith(".json"):
+            continue
+        src = str(snap_dir / name)
+        dst = f"{push_dir}/commits/{name}"
+        try:
+            os.rename(src, dst)
+        except FileNotFoundError:
+            pass

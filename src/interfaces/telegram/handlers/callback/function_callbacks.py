@@ -3,6 +3,7 @@
 处理基础功能相关的回调，如签到、充值、帮助等
 """
 
+import asyncio
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
@@ -115,7 +116,28 @@ class FunctionCallbackHandler(BaseCallbackHandler):
         else:
             message = f"ℹ️ {result['message']}"
         
+        # 立即返回签到结果，不阻塞响应
         await self._safe_edit_message(query, message)
+        
+        # 将会话创建和行为记录移到后台，避免阻塞签到响应
+        async def _background_checkin_side_effects(user_id: int):
+            try:
+                session_inner = await self.session_service.get_or_create_session(user_id)
+                if not session_inner:
+                    return
+                await self.action_record_service.record_action(
+                    user_id=user_id,
+                    session_id=session_inner['session_id'],
+                    action_type='daily_checkin',
+                    message_context='用户执行每日签到'
+                )
+            except Exception as e:
+                self.logger.error(f"签到副作用失败(后台): {e}")
+
+        try:
+            asyncio.create_task(_background_checkin_side_effects(user_data['id']))
+        except Exception as e:
+            self.logger.error(f"调度签到副作用后台任务失败: {e}")
     
     @robust_callback_handler
     async def handle_show_help_callback(self, query, context):

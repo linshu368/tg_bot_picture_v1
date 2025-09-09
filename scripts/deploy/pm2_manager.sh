@@ -4,7 +4,7 @@
 # 使用方法: ./pm2_manager.sh [start|stop|restart|status|logs|delete]
 
 APP_NAME="tg-bot-picture"
-PROJECT_DIR="/home/tg_bot_picture_v1"
+PROJECT_DIR="/Users/qj/python_project/tg_bot_picture_v1"
 RUN_SH="$PROJECT_DIR/scripts/deploy/run.sh"
 
 # 颜色定义
