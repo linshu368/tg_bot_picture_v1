@@ -33,5 +33,5 @@ git reset --hard "$TARGET"
 git push origin main -f
 
 echo "✅ main 已成功回滚到 $TARGET"
-echo "ℹ️  如果要恢复，可以 checkout 或 reset 到备份 tag:"
-echo "       git checkout $BACKUP_TAG"
+# echo "ℹ️  如果要恢复，可以 checkout 或 reset 到备份 tag:"
+# echo "       git checkout $BACKUP_TAG"
