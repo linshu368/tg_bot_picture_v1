@@ -17,9 +17,10 @@ OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
   --diff "$DIFF_FILE" \
   --commit-id "$COMMIT_ID")"
 
-# 保存快照（文件名 = commit_id.json）
+# 保存快照（文件名 = 时间戳.json）
 SNAPSHOT_DIR="$REPO_ROOT/logs/snapshots"
 mkdir -p "$SNAPSHOT_DIR"
-echo "$OUT_JSON" > "$SNAPSHOT_DIR/$COMMIT_ID.json"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+echo "$OUT_JSON" > "$SNAPSHOT_DIR/$TIMESTAMP.json"
 
-echo "Commit log saved: $SNAPSHOT_DIR/$COMMIT_ID.json"
+echo "Commit log saved: $SNAPSHOT_DIR/$TIMESTAMP.json"
