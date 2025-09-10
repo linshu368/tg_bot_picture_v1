@@ -13,7 +13,7 @@ if [[ ! -s "$DIFF_FILE" ]]; then
   exit 0
 fi
 
-PY_BIN="$REPO_ROOT/venv/bin/python"
+PY_BIN="$REPO_ROOT/venv/bin/python3"
 if [ ! -x "$PY_BIN" ]; then
   PY_BIN="python3"
 fi
@@ -25,10 +25,10 @@ OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
 # 取出 message
 raw_message="$(echo "$OUT_JSON" | jq -r '.message')"
 
-# 如果 AI 返回失败提示，也阻止提交
-if [[ "$raw_message" == "> AI 生成失败"* ]]; then
-  echo "❌ AI 调用异常，提交已被阻止"
-  exit 1
+# 如果 AI 返回失败提示，使用默认提交信息
+if [[ "$raw_message" == "> AI 生成失败"* ]] || [[ -z "$raw_message" ]]; then
+  echo "⚠️  AI 调用失败，使用默认提交信息"
+  raw_message="chore: $(git diff --cached --name-only | head -3 | tr '\n' ' ' | sed 's/ $//')"
 fi
 
 # 写入 commit message
