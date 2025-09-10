@@ -13,7 +13,8 @@ class gptCaller:
         """
         # 从环境变量读取 API Key 和模型
         self.api_key = os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("OPENAI_MODEL", "gpt-5-2025-08-07")
+        # self.model =  "gpt-5-2025-08-07"
+        self.model = "gpt-4.1"
         # self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 默认用 gpt-4o-mini
         self.url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
 

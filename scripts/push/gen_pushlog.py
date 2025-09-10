@@ -51,6 +51,7 @@ def collect_push_diff(remote: str, branch: str) -> str:
     """获取本次 push 的整体 diff"""
     rev_range = f"{remote}/{branch}..HEAD"
     diff_content = subprocess.getoutput(f"git diff {rev_range}")
+    print(diff_content)
     return diff_content
 
 
@@ -87,23 +88,23 @@ prompt = build_prompt(args.prompt, diff_content)
 gpt = gptCaller()
 
 # gpt_4o_mini = gptCaller(model="gpt-4o-mini")
-try:
-    md = gpt.get_response(prompt)
-    message = md
-except Exception as e:
+# try:
+md = gpt.get_response(prompt)
+message = md
+# except Exception as e:
    
-    # if commitlogs:
-    #     # commitlogs 里历史可能是对象或字符串，这里做兼容
-    #     parts = []
-    #     for c in commitlogs:
-    #         m = c.get("message")
-    #         if isinstance(m, dict):
-    #             parts.append(m.get("title") or "")
-    #         elif isinstance(m, str):
-    #             parts.append(m)
-    #     message = "\n".join([p for p in parts if p]) or "> fallback: no titles found"
-    # else:
-        message = "push update\nno commitlogs found"
+#     # if commitlogs:
+#     #     # commitlogs 里历史可能是对象或字符串，这里做兼容
+#     #     parts = []
+#     #     for c in commitlogs:
+#     #         m = c.get("message")
+#     #         if isinstance(m, dict):
+#     #             parts.append(m.get("title") or "")
+#     #         elif isinstance(m, str):
+#     #             parts.append(m)
+#     #     message = "\n".join([p for p in parts if p]) or "> fallback: no titles found"
+#     # else:
+#         message = "push update\nno commitlogs found"
 
 # 🔹 第二次调用 GPT，生成 pushlog 目录名
 try:
