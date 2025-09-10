@@ -47,27 +47,11 @@ def main():
     prompt = build_prompt(args.prompt, args.diff)
 
     gpt = gptCaller()
-    
-    # 重试机制
-    max_retries = 3
-    retry_delay = 2  # 秒
-    
-    for attempt in range(max_retries):
-        try:
-            md = gpt.get_response(prompt)
-            # 清理消息中的控制字符，确保JSON有效
-            import re
-            message = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', md)
-            break  # 成功则跳出重试循环
-        except Exception as e:
-            if attempt < max_retries - 1:
-                print(f"AI 调用失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}", file=sys.stderr)
-                print(f"等待 {retry_delay} 秒后重试...", file=sys.stderr)
-                import time
-                time.sleep(retry_delay)
-                retry_delay *= 2  # 指数退避
-            else:
-                message = f"> AI 生成失败: {str(e)}"
+    try:
+        md = gpt.get_response(prompt)
+        message = md
+    except Exception as e:
+        message = f"> AI 生成失败: {str(e)}"
 
     # 元数据（commit_id 仅作透传，不做保存）
     commit_log = {
