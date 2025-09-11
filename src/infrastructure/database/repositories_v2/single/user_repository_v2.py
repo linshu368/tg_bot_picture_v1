@@ -102,11 +102,15 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
     async def get_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         """根据Telegram ID获取用户"""
         try:
+            self.logger.debug(f"[UserRepositoryV2] get_by_telegram_id 查询: telegram_id={telegram_id}")
             client = self.get_client()
             result = client.table(self.table_name).select('*').eq('telegram_id', telegram_id).execute()
             
             if result.data and len(result.data) > 0:
-                return result.data[0]
+                user = result.data[0]
+                self.logger.info(f"[UserRepositoryV2] 命中用户: id={user.get('id')}, uid={user.get('uid')}")
+                return user
+            self.logger.info(f"[UserRepositoryV2] 未找到用户: telegram_id={telegram_id}")
             return None
             
         except Exception as e:

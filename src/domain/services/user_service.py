@@ -73,7 +73,13 @@ class UserService:
     async def get_user_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         """通过Telegram ID获取用户"""
         try:
-            return await self.user_repo.get_by_telegram_id(telegram_id)
+            self.logger.debug(f"[UserService] get_user_by_telegram_id 调用: telegram_id={telegram_id}")
+            user = await self.user_repo.get_by_telegram_id(telegram_id)
+            if user:
+                self.logger.info(f"[UserService] 获取用户成功: telegram_id={telegram_id}, user_id={user.get('id')}, uid={user.get('uid')}")
+            else:
+                self.logger.info(f"[UserService] 用户不存在: telegram_id={telegram_id}")
+            return user
         except Exception as e:
             self.logger.error(f"通过Telegram ID获取用户失败: {e}")
             return None

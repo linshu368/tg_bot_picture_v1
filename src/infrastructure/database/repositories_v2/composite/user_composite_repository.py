@@ -168,10 +168,18 @@ class UserCompositeRepository:
     async def get_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         """根据Telegram ID获取用户完整信息"""
         try:
+            self.logger.debug(f"[UserCompositeRepository] get_by_telegram_id 调用: telegram_id={telegram_id}")
             user = await self.user_repo.get_by_telegram_id(telegram_id)
             if not user:
+                self.logger.info(f"[UserCompositeRepository] 未找到基础用户: telegram_id={telegram_id}")
                 return None
-            return await self.get_by_id(user['id'])
+            self.logger.debug(f"[UserCompositeRepository] 基础用户获取成功: user_id={user.get('id')}, uid={user.get('uid')}")
+            full_user = await self.get_by_id(user['id'])
+            if full_user:
+                self.logger.info(f"[UserCompositeRepository] 聚合用户信息成功: user_id={user.get('id')}")
+            else:
+                self.logger.warning(f"[UserCompositeRepository] 聚合用户信息失败: user_id={user.get('id')}")
+            return full_user
         except Exception as e:
             self.logger.error(f"根据Telegram ID获取用户失败: {e}")
             return None

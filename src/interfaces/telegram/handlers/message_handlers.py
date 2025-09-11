@@ -101,14 +101,18 @@ class MessageHandler:
         flow.log(f"收到文本消息: {text}")
 
         try:
+            # 先获取用户信息，避免重复调用
+            self.logger.info(f"调用 _safe_get_user(user_id={user.id})")
+            user_data = await self._safe_get_user(user.id)
+            self.logger.info(f"_safe_get_user 返回: {'OK' if user_data else 'None'}")
+            
             # 会话创建与行为记录放后台，避免阻塞首响
-            async def _background_text_side_effects(telegram_user_id: int, preview_text: str):
+            async def _background_text_side_effects(user_data_inner: dict, preview_text: str):
                 try:
-                    self.logger.info(f"[TEXT_BG] 调用 _safe_get_user(telegram_user_id={telegram_user_id})")
-                    user_data_inner = await self._safe_get_user(telegram_user_id)
-                    self.logger.info(f"[TEXT_BG] _safe_get_user 返回: {'OK' if user_data_inner else 'None'}")
                     if not user_data_inner:
+                        self.logger.info("[TEXT_BG] 用户数据为空，跳过后台任务")
                         return
+                    self.logger.info(f"[TEXT_BG] 使用已获取的用户数据: user_id={user_data_inner['id']}")
                     self.logger.info(f"[TEXT_BG] 调用 get_or_create_session(user_id={user_data_inner['id']})")
                     session_inner = await self.session_service.get_or_create_session(user_data_inner['id'])
                     self.logger.info(f"[TEXT_BG] get_or_create_session 返回: {session_inner.get('session_id') if session_inner else 'None'}")
@@ -127,7 +131,8 @@ class MessageHandler:
                     self.logger.error(f"文本消息副作用失败(后台): {e}")
 
             try:
-                asyncio.create_task(_background_text_side_effects(user.id, text))
+                # 传递已获取的用户数据，避免重复查询
+                asyncio.create_task(_background_text_side_effects(user_data, text))
             except Exception as e:
                 self.logger.error(f"调度文本副作用后台任务失败: {e}")
             
@@ -152,13 +157,15 @@ class MessageHandler:
                     await update.message.reply_text("❌ 身份码格式错误，已退出找回流程")
                     # 继续正常处理用户输入
             
-            # 获取用户信息
-            self.logger.info(f"调用 _safe_get_user(user_id={user.id})")
-            user_data = await self._safe_get_user(user.id)
-            self.logger.info(f"_safe_get_user 返回: {'OK' if user_data else 'None'}")
+            # 检查用户是否存在
             if not user_data:
                 await update.message.reply_text("❌ 用户不存在，请先使用 /start")
                 return
+
+            # 模拟用户数据
+            # user_data = {"id": 3, "telegram_id": user.id, "mock": True}
+            # self.logger.info("_safe_get_user 被跳过，用 mock 数据代替")
+
             
             # 正常处理文本输入
             await self._handle_button_dispatch(update, context, text)
@@ -172,8 +179,14 @@ class MessageHandler:
 
     async def _safe_get_user(self, user_id: int):
         """安全获取用户信息"""
+        self.logger.info(f"开始获取用户信息: telegram_id={user_id}")
         try:
-            return await self.user_service.get_user_by_telegram_id(user_id)
+            user = await self.user_service.get_user_by_telegram_id(user_id)
+            if user:
+                self.logger.info(f"获取用户信息成功: telegram_id={user_id}, user_id={user.get('id')}, uid={user.get('uid')}")
+            else:
+                self.logger.warning(f"未找到用户: telegram_id={user_id}")
+            return user
         except Exception as e:
             self.logger.error(f"获取用户信息失败: {user_id}, 错误: {e}")
             return None
