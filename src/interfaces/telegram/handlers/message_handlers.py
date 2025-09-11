@@ -18,6 +18,9 @@ from src.utils.config.app_config import (
     UID_PREFIX, UID_LENGTH
 )
 
+from src.interfaces.telegram.flow_logger import FlowLogger
+
+
 
 class MessageHandler:
     """消息处理器"""
@@ -93,23 +96,33 @@ class MessageHandler:
         text = update.message.text
         user = update.effective_user
         
+        # ==== 新增：创建 FlowLogger ====
+        flow = FlowLogger("TEXT_MESSAGE_FLOW", user.id if user else None)
+        flow.log(f"收到文本消息: {text}")
+
         try:
             # 会话创建与行为记录放后台，避免阻塞首响
             async def _background_text_side_effects(telegram_user_id: int, preview_text: str):
                 try:
+                    self.logger.info(f"[TEXT_BG] 调用 _safe_get_user(telegram_user_id={telegram_user_id})")
                     user_data_inner = await self._safe_get_user(telegram_user_id)
+                    self.logger.info(f"[TEXT_BG] _safe_get_user 返回: {'OK' if user_data_inner else 'None'}")
                     if not user_data_inner:
                         return
+                    self.logger.info(f"[TEXT_BG] 调用 get_or_create_session(user_id={user_data_inner['id']})")
                     session_inner = await self.session_service.get_or_create_session(user_data_inner['id'])
+                    self.logger.info(f"[TEXT_BG] get_or_create_session 返回: {session_inner.get('session_id') if session_inner else 'None'}")
                     if not session_inner:
                         return
                     short = preview_text[:50] + '...' if len(preview_text) > 50 else preview_text
+                    self.logger.info(f"[TEXT_BG] 调用 record_action(user_id={user_data_inner['id']}, action_type='send_text')")
                     await self.action_record_service.record_action(
                         user_id=user_data_inner['id'],
                         session_id=session_inner['session_id'],
                         action_type='send_text',
                         message_context=f'用户发送文本: {short}'
                     )
+                    self.logger.info("[TEXT_BG] record_action 完成")
                 except Exception as e:
                     self.logger.error(f"文本消息副作用失败(后台): {e}")
 
@@ -119,9 +132,13 @@ class MessageHandler:
                 self.logger.error(f"调度文本副作用后台任务失败: {e}")
             
             # 检查用户状态 - 如果正在等待UID输入
+            self.logger.info(f"获取用户状态: get_current_state(user_id={user.id})")
             current_state = self.state_manager.get_current_state(user.id)
+            self.logger.info(f"当前用户状态: {current_state}")
             if current_state == States.WAITING_UID_INPUT:
+                self.logger.info(f"重置用户状态: reset_user_state(user_id={user.id})")
                 self.state_manager.reset_user_state(user.id)  # 先清除状态
+                self.logger.info("用户状态已重置")
                 
                 # 检查输入是否为有效的UID格式
                 uid = text.strip()
@@ -136,7 +153,9 @@ class MessageHandler:
                     # 继续正常处理用户输入
             
             # 获取用户信息
+            self.logger.info(f"调用 _safe_get_user(user_id={user.id})")
             user_data = await self._safe_get_user(user.id)
+            self.logger.info(f"_safe_get_user 返回: {'OK' if user_data else 'None'}")
             if not user_data:
                 await update.message.reply_text("❌ 用户不存在，请先使用 /start")
                 return
@@ -147,6 +166,9 @@ class MessageHandler:
         except Exception as e:
             self.logger.error(f"处理文本消息失败: {e}")
             await self._handle_text_message_error(update, user.id, e)
+        # ==== 新增：链路结束 ====  
+        finally:
+            flow.done()
 
     async def _safe_get_user(self, user_id: int):
         """安全获取用户信息"""
@@ -156,9 +178,11 @@ class MessageHandler:
             self.logger.error(f"获取用户信息失败: {user_id}, 错误: {e}")
             return None
 
-    async def _handle_button_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    async def _handle_button_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str,flow_logger=None):
         """分发按钮处理，每个功能独立错误处理"""
         
+        if flow_logger:
+            flow_logger.log(f"进入按钮分发: {text}")
         # 检查用户是否处于等待UID输入状态，如果点击的不是找回账号按钮，则清除该状态
         # 这样用户可以正常使用其他功能，不会被卡在UID验证状态
         user_id = update.effective_user.id
@@ -181,7 +205,7 @@ class MessageHandler:
         }
         
         if text in function_map:
-            await self._safe_handle_function(function_map[text], update, context)
+            await self._safe_handle_function(function_map[text], update, context,flow_logger=flow_logger)
         else:
             # 默认提示
             await update.message.reply_text(
@@ -192,10 +216,16 @@ class MessageHandler:
                 "🛒 /buy - 购买积分"
             )
 
-    async def _safe_handle_function(self, func, update, context, *args):
+    async def _safe_handle_function(self, func, update, context, *args, flow_logger=None):
         """安全执行功能函数，提供独立的错误处理"""
         try:
-            await func(update, context, *args)
+            if flow_logger:
+                flow_logger.log(f"进入功能处理: {getattr(func, '__name__', '未知功能')}")
+
+            await func(update, context, *args,flow_logger=flow_logger)
+
+            if flow_logger:
+                flow_logger.log(f"完成功能处理: {getattr(func, '__name__', '未知功能')}")
         except Exception as e:
             function_name = getattr(func, '__name__', '未知功能')
             self.logger.error(f"功能 {function_name} 执行失败: {e}")
@@ -384,11 +414,17 @@ class MessageHandler:
         user_handler = UserCommandHandler(self.bot)
         await user_handler.handle_recover_command(update, context)
 
-    async def _handle_help_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def _handle_help_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE,flow_logger=None):
         """处理帮助按钮"""
+        if flow_logger:
+            flow_logger.log("进入帮助按钮处理")
+
         from .command.user_commands import UserCommandHandler
         user_handler = UserCommandHandler(self.bot)
-        await user_handler.handle_help_command(update, context)
+        await user_handler.handle_help_command(update, context,flow_logger=flow_logger)
+
+        if flow_logger:
+            flow_logger.log("帮助按钮处理完成")
 
     async def _process_uid_recovery(self, update: Update, context: ContextTypes.DEFAULT_TYPE, uid: str):
         """处理UID找回逻辑"""
