@@ -6,6 +6,7 @@
 """
 
 import logging
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -289,15 +290,28 @@ class UserService:
     # （旧的签到辅助方法已移除）
     
     async def get_user_statistics(self, user_id: int) -> Dict[str, Any]:
-        """获取用户统计信息"""
+        """获取用户统计信息 - 性能优化版"""
         try:
-            user = await self.user_repo.get_by_id(user_id)
-            if not user:
+            # 🚀 并行获取用户信息和积分统计
+            user, total_earned, total_spent = await asyncio.gather(
+                self.user_repo.get_by_id(user_id),
+                self.point_repo.get_user_total_earned(user_id),
+                self.point_repo.get_user_total_spent(user_id),
+                return_exceptions=True
+            )
+            
+            # 处理用户信息异常
+            if isinstance(user, Exception) or not user:
+                self.logger.error(f"获取用户信息失败: {user if isinstance(user, Exception) else '用户不存在'}")
                 return {}
             
-            # 获取积分统计
-            total_earned = await self.point_repo.get_user_total_earned(user_id)
-            total_spent = await self.point_repo.get_user_total_spent(user_id)
+            # 处理积分统计异常
+            if isinstance(total_earned, Exception):
+                self.logger.warning(f"获取用户总收入积分失败: {total_earned}")
+                total_earned = 0
+            if isinstance(total_spent, Exception):
+                self.logger.warning(f"获取用户总支出积分失败: {total_spent}")
+                total_spent = 0
             
             return {
                 'user_id': user_id,

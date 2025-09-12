@@ -8,6 +8,7 @@ v2版本变化：
 3. 表字段已重命名为与旧版一致：points字段
 """
 
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from .base_repository_v2 import BaseRepositoryV2
@@ -56,8 +57,10 @@ class UserWalletRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(wallet_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_wallet = result.data[0]
@@ -74,7 +77,10 @@ class UserWalletRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据钱包ID获取钱包信息"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', wallet_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', wallet_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -88,7 +94,10 @@ class UserWalletRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据用户ID获取钱包信息"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('user_id', user_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('user_id', user_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -114,8 +123,10 @@ class UserWalletRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', wallet_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', wallet_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"钱包更新成功: wallet_id={wallet_id}")
@@ -144,8 +155,10 @@ class UserWalletRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('user_id', user_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('user_id', user_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"用户钱包更新成功: user_id={user_id}")
@@ -170,7 +183,8 @@ class UserWalletRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]

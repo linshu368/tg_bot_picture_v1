@@ -145,15 +145,28 @@ class UserCompositeRepository:
                 return self._standardize_error_response(message="用户创建失败")
     
     async def get_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """根据ID获取用户完整信息（聚合多表数据）"""
+        """根据ID获取用户完整信息（聚合多表数据）- 性能优化版"""
         try:
-            # 并行获取各表数据
-            user = await self.user_repo.get_by_id(user_id)
-            if not user:
+            # 🚀 并行获取所有表数据，减少DB往返次数
+            user, wallet, stats = await asyncio.gather(
+                self.user_repo.get_by_id(user_id),
+                self.wallet_repo.get_by_user_id(user_id),
+                self.stats_repo.get_by_user_id(user_id),
+                return_exceptions=True
+            )
+            
+            # 检查基础用户数据
+            if isinstance(user, Exception) or not user:
+                self.logger.warning(f"获取用户基础信息失败: user_id={user_id}")
                 return None
             
-            wallet = await self.wallet_repo.get_by_user_id(user_id)
-            stats = await self.stats_repo.get_by_user_id(user_id)
+            # 处理钱包和统计数据的异常情况
+            if isinstance(wallet, Exception):
+                self.logger.warning(f"获取用户钱包信息失败: {wallet}")
+                wallet = None
+            if isinstance(stats, Exception):
+                self.logger.warning(f"获取用户统计信息失败: {stats}")
+                stats = None
             
             # 聚合数据，单表Repository已处理字段映射
             return {
@@ -166,51 +179,107 @@ class UserCompositeRepository:
             return None
     
     async def get_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
-        """根据Telegram ID获取用户完整信息"""
+        """根据Telegram ID获取用户完整信息 - 性能优化版"""
         try:
-            self.logger.debug(f"[UserCompositeRepository] get_by_telegram_id 调用: telegram_id={telegram_id}")
+            self.logger.info(f"🔍 [UserCompositeRepository] get_by_telegram_id 调用: telegram_id={telegram_id}")
             user = await self.user_repo.get_by_telegram_id(telegram_id)
             if not user:
                 self.logger.info(f"[UserCompositeRepository] 未找到基础用户: telegram_id={telegram_id}")
                 return None
-            self.logger.debug(f"[UserCompositeRepository] 基础用户获取成功: user_id={user.get('id')}, uid={user.get('uid')}")
-            full_user = await self.get_by_id(user['id'])
-            if full_user:
-                self.logger.info(f"[UserCompositeRepository] 聚合用户信息成功: user_id={user.get('id')}")
-            else:
-                self.logger.warning(f"[UserCompositeRepository] 聚合用户信息失败: user_id={user.get('id')}")
+            
+            self.logger.info(f"🔍 [UserCompositeRepository] 基础用户获取成功: user_id={user.get('id')}, uid={user.get('uid')}")
+            
+            # 🚀 直接并行获取钱包和统计信息，避免二次调用get_by_id
+            user_id = user['id']
+            wallet, stats = await asyncio.gather(
+                self.wallet_repo.get_by_user_id(user_id),
+                self.stats_repo.get_by_user_id(user_id),
+                return_exceptions=True
+            )
+            
+            # 处理异常情况
+            if isinstance(wallet, Exception):
+                self.logger.warning(f"获取用户钱包信息失败: {wallet}")
+                wallet = None
+            if isinstance(stats, Exception):
+                self.logger.warning(f"获取用户统计信息失败: {stats}")
+                stats = None
+            
+            full_user = {
+                **user,
+                **(wallet or {}),  # 钱包数据（包含points字段）
+                **(stats or {}),   # 统计数据（包含session_count等）
+            }
+            
+            self.logger.info(f"[UserCompositeRepository] 聚合用户信息成功: user_id={user_id}")
             return full_user
         except Exception as e:
             self.logger.error(f"根据Telegram ID获取用户失败: {e}")
             return None
     
     async def get_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:
-        """根据UID获取用户完整信息"""
+        """根据UID获取用户完整信息 - 性能优化版"""
         try:
             user = await self.user_repo.get_by_uid(uid)
             if not user:
                 return None
-            return await self.get_by_id(user['id'])
+            
+            # 🚀 直接并行获取钱包和统计信息，避免二次调用get_by_id
+            user_id = user['id']
+            wallet, stats = await asyncio.gather(
+                self.wallet_repo.get_by_user_id(user_id),
+                self.stats_repo.get_by_user_id(user_id),
+                return_exceptions=True
+            )
+            
+            # 处理异常情况
+            if isinstance(wallet, Exception):
+                self.logger.warning(f"获取用户钱包信息失败: {wallet}")
+                wallet = None
+            if isinstance(stats, Exception):
+                self.logger.warning(f"获取用户统计信息失败: {stats}")
+                stats = None
+            
+            return {
+                **user,
+                **(wallet or {}),  # 钱包数据（包含points字段）
+                **(stats or {}),   # 统计数据（包含session_count等）
+            }
         except Exception as e:
             self.logger.error(f"根据UID获取用户失败: {e}")
             return None
     
     async def update(self, user_id: int, data: Dict[str, Any]) -> bool:
-        """更新用户信息（智能分发到对应的表）"""
+        """更新用户信息（智能分发到对应的表）- 性能优化版"""
         try:
-            success = True
-            
             # 用户基础信息字段
             user_fields = {'username', 'first_name', 'last_name', 'is_active', 'utm_source'}
             user_data = {k: v for k, v in data.items() if k in user_fields}
-            if user_data:
-                success &= await self.user_repo.update(user_id, user_data)
             
             # 钱包相关字段
             wallet_fields = {'points', 'level', 'first_add', 'total_paid_amount', 'total_points_spent'}
             wallet_data = {k: v for k, v in data.items() if k in wallet_fields}
+            
+            # 🚀 并行执行用户和钱包更新
+            tasks = []
+            if user_data:
+                tasks.append(self.user_repo.update(user_id, user_data))
             if wallet_data:
-                success &= await self.wallet_repo.update_by_user_id(user_id, wallet_data)
+                tasks.append(self.wallet_repo.update_by_user_id(user_id, wallet_data))
+            
+            if not tasks:
+                return True  # 没有需要更新的数据
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 检查所有更新结果
+            success = True
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    self.logger.error(f"更新操作失败: {result}")
+                    success = False
+                elif not result:
+                    success = False
             
             return success
         except Exception as e:
@@ -323,14 +392,30 @@ class UserCompositeRepository:
             wallets = {}
             stats = {}
             
-            # 这里可以进一步优化为批量查询
-            for user_id in user_ids:
-                wallet = await self.wallet_repo.get_by_user_id(user_id)
-                stat = await self.stats_repo.get_by_user_id(user_id)
-                if wallet:
-                    wallets[user_id] = wallet
-                if stat:
-                    stats[user_id] = stat
+            # 🚀 批量并行查询优化：减少N+1查询问题
+            wallet_tasks = [self.wallet_repo.get_by_user_id(user_id) for user_id in user_ids]
+            stats_tasks = [self.stats_repo.get_by_user_id(user_id) for user_id in user_ids]
+            
+            # 并行执行所有钱包和统计查询
+            wallet_results, stats_results = await asyncio.gather(
+                asyncio.gather(*wallet_tasks, return_exceptions=True),
+                asyncio.gather(*stats_tasks, return_exceptions=True),
+                return_exceptions=True
+            )
+            
+            # 处理结果和异常
+            for i, user_id in enumerate(user_ids):
+                # 处理钱包数据
+                if not isinstance(wallet_results, Exception) and i < len(wallet_results):
+                    wallet = wallet_results[i]
+                    if not isinstance(wallet, Exception) and wallet:
+                        wallets[user_id] = wallet
+                
+                # 处理统计数据
+                if not isinstance(stats_results, Exception) and i < len(stats_results):
+                    stat = stats_results[i]
+                    if not isinstance(stat, Exception) and stat:
+                        stats[user_id] = stat
             
             # 聚合数据
             enriched_users = []
@@ -349,17 +434,28 @@ class UserCompositeRepository:
             return []
     
     async def find_one(self, **conditions) -> Optional[Dict[str, Any]]:
-        """查找单个用户（与旧版UserRepository接口完全一致）"""
+        """查找单个用户（与旧版UserRepository接口完全一致）- 性能优化版"""
         try:
             # 先获取基础用户信息
             user = await self.user_repo.find_one(**conditions)
             if not user:
                 return None
             
-            # 聚合钱包和统计信息
+            # 🚀 并行聚合钱包和统计信息
             user_id = user['id']
-            wallet = await self.wallet_repo.get_by_user_id(user_id)
-            stats = await self.stats_repo.get_by_user_id(user_id)
+            wallet, stats = await asyncio.gather(
+                self.wallet_repo.get_by_user_id(user_id),
+                self.stats_repo.get_by_user_id(user_id),
+                return_exceptions=True
+            )
+            
+            # 处理异常情况
+            if isinstance(wallet, Exception):
+                self.logger.warning(f"获取用户钱包信息失败: {wallet}")
+                wallet = None
+            if isinstance(stats, Exception):
+                self.logger.warning(f"获取用户统计信息失败: {stats}")
+                stats = None
             
             return {
                 **user,

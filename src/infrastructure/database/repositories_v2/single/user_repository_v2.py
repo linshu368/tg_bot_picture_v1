@@ -72,8 +72,10 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(user_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_user = result.data[0]
@@ -90,7 +92,10 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据ID获取用户"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', user_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', user_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -115,11 +120,10 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             
             # 步骤3: 执行数据库查询
             self.logger.info(f"🔧 [UserRepositoryV2] 步骤3: 开始执行数据库查询")
-            result = client.table(self.table_name).select('*').eq('telegram_id', telegram_id).execute()
-            #用 asyncio.to_thread() 包裹
-            # result = await asyncio.to_thread(
-            #     lambda: client.table(self.table_name).select('*').eq('telegram_id', telegram_id).execute()
-            # )
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('telegram_id', telegram_id).execute()
+            )
             self.logger.info(f"✅ [UserRepositoryV2] 步骤3完成: 数据库查询执行完成")
             
             # 步骤4: 处理查询结果
@@ -146,7 +150,10 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据UID获取用户"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('uid', uid).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('uid', uid).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -175,8 +182,10 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', user_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', user_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"用户更新成功: user_id={user_id}")
@@ -213,7 +222,8 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]

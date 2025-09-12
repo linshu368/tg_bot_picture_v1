@@ -9,6 +9,7 @@ v2版本变化：
 4. 保持所有原有业务方法不变
 """
 
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from .base_repository_v2 import BaseRepositoryV2
@@ -47,8 +48,10 @@ class PointRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(record_data)
             
-            # 插入记录
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_record = result.data[0]
@@ -65,7 +68,10 @@ class PointRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据ID获取积分记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', record_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -91,8 +97,10 @@ class PointRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', record_id).execute()
+            # 🚀 修复：使用异步调用，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"积分记录更新成功: record_id={record_id}")

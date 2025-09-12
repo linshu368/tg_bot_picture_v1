@@ -11,6 +11,7 @@
 
 import logging
 import uuid
+import asyncio
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from decimal import Decimal
@@ -216,24 +217,41 @@ class PointCompositeRepository:
                     lambda: self.wallet_repo.subtract_points(user_id, points_awarded)
                 )
                 
-                # 3. 更新钱包的总充值金额（会自动处理首次充值标记）
-                await self.wallet_repo.add_paid_amount(user_id, float(amount))
+                # 🚀 并行执行：更新总充值金额 + 获取钱包信息
+                paid_amount_task = self.wallet_repo.add_paid_amount(user_id, float(amount))
+                wallet_info_task = self.wallet_repo.get_by_user_id(user_id)
                 
-                # 4. 获取更新后的钱包信息
-                wallet = await self.wallet_repo.get_by_user_id(user_id)
+                _, wallet = await asyncio.gather(
+                    paid_amount_task,
+                    wallet_info_task,
+                    return_exceptions=True
+                )
+                
+                # 处理异常情况
+                if isinstance(wallet, Exception):
+                    raise Exception(f"获取更新后的钱包信息失败: {wallet}")
                 if not wallet:
                     raise Exception("获取更新后的钱包信息失败")
                 
-                # 5. 创建积分流水记录
-                point_record_data = {
-                    'user_id': user_id,
-                    'points_change': points_awarded,  # 使用新的字段名
-                    'action_type': 'payment',
-                    'description': f"充值获得积分 - 订单:{order_id}",
-                    'points_balance': wallet['points'],  # 使用新的字段名
-                    'related_event_id': None  # 设置为None，让数据库处理，避免UUID格式错误
-                }
-                await self.point_repo.create(point_record_data)
+                # 5. 积分流水记录改为后台异步处理，避免阻塞支付响应
+                async def _background_payment_record():
+                    try:
+                        point_record_data = {
+                            'user_id': user_id,
+                            'points_change': points_awarded,  # 使用新的字段名
+                            'action_type': 'payment',
+                            'description': f"充值获得积分 - 订单:{order_id}",
+                            'points_balance': wallet['points'],  # 使用新的字段名
+                            'related_event_id': None  # 设置为None，让数据库处理，避免UUID格式错误
+                        }
+                        await self.point_repo.create(point_record_data)
+                    except Exception as bg_err:
+                        self.logger.error(f"支付积分流水记录失败(后台): {bg_err}")
+                
+                try:
+                    asyncio.create_task(_background_payment_record())
+                except Exception as schedule_err:
+                    self.logger.error(f"调度支付积分流水后台任务失败: {schedule_err}")
                 
                 self.logger.info(f"支付处理成功: order_id={order_id}, +{points_awarded}积分, 余额={wallet['points']}")
                 return True
@@ -280,12 +298,7 @@ class PointCompositeRepository:
                     lambda: self.wallet_repo.add_points(user_id, points_cost)
                 )
                 
-                # 2. 获取更新后的钱包信息
-                wallet = await self.wallet_repo.get_by_user_id(user_id)
-                if not wallet:
-                    raise Exception("获取更新后的钱包信息失败")
-                
-                # 3. 创建任务记录
+                # 🚀 并行执行：获取钱包信息 + 创建任务记录
                 task_create_data = {
                     'user_id': user_id,
                     'task_type': task_type,
@@ -293,19 +306,42 @@ class PointCompositeRepository:
                     'points_cost': points_cost,
                     **(task_data or {})
                 }
-                task = await self.task_repo.create(task_create_data)
+                
+                wallet, task = await asyncio.gather(
+                    self.wallet_repo.get_by_user_id(user_id),
+                    self.task_repo.create(task_create_data),
+                    return_exceptions=True
+                )
+                
+                # 处理异常情况
+                if isinstance(wallet, Exception):
+                    raise Exception(f"获取更新后的钱包信息失败: {wallet}")
+                if isinstance(task, Exception):
+                    raise Exception(f"创建任务记录失败: {task}")
+                if not wallet:
+                    raise Exception("获取更新后的钱包信息失败")
+                
                 rollback_actions.append(lambda: self.task_repo.delete(task['id']))
                 
-                # 4. 创建积分流水记录
-                point_record_data = {
-                    'user_id': user_id,
-                    'points_change': -points_cost,  # 负数表示扣除
-                    'action_type': 'task_cost',
-                    'description': f"{task_type}任务消耗积分",
-                    'points_balance': wallet['points'],  # 使用新的字段名
-                    'related_event_id': None  # 设置为None，让数据库处理，避免UUID格式错误
-                }
-                await self.point_repo.create(point_record_data)
+                # 4. 积分流水记录改为后台异步处理，避免阻塞响应
+                async def _background_point_record():
+                    try:
+                        point_record_data = {
+                            'user_id': user_id,
+                            'points_change': -points_cost,  # 负数表示扣除
+                            'action_type': 'task_cost',
+                            'description': f"{task_type}任务消耗积分",
+                            'points_balance': wallet['points'],  # 使用新的字段名
+                            'related_event_id': None  # 设置为None，让数据库处理，避免UUID格式错误
+                        }
+                        await self.point_repo.create(point_record_data)
+                    except Exception as bg_err:
+                        self.logger.error(f"任务积分流水记录失败(后台): {bg_err}")
+                
+                try:
+                    asyncio.create_task(_background_point_record())
+                except Exception as schedule_err:
+                    self.logger.error(f"调度任务积分流水后台任务失败: {schedule_err}")
                 
                 self.logger.info(f"任务创建成功: task_id={task['id']}, -{points_cost}积分, 余额={wallet['points']}")
                 return task
