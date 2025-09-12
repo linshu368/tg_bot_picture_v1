@@ -21,7 +21,7 @@ class UserService:
     # 修改：精简构造参数，仅保留组合仓库
     # 目的：服务层与V2组合Repository完全适配，移除旧仓库/回退/并行验证
     def __init__(self, user_composite_repo=None, point_composite_repo=None,
-                 credit_settings: CreditSettings = None):
+                 credit_settings: CreditSettings = None, supabase_manager=None):
         """
         初始化用户服务
         
@@ -37,6 +37,9 @@ class UserService:
             raise ValueError("必须提供user_composite_repo和point_composite_repo")
         self.user_repo = user_composite_repo
         self.point_repo = point_composite_repo
+        
+        # 为性能测试保存supabase_manager引用
+        self.supabase_manager = supabase_manager
         self.logger.info("🔧 使用组合Repository（已迁移）")
     
     
@@ -74,7 +77,19 @@ class UserService:
         """通过Telegram ID获取用户"""
         try:
             self.logger.debug(f"[UserService] get_user_by_telegram_id 调用: telegram_id={telegram_id}")
+            # 性能测试：直接使用单表repo，绕过组合repo
+            # from src.infrastructure.database.repositories_v2.single import UserRepositoryV2
+            # user_single_repo = UserRepositoryV2(self.supabase_manager)
+            # # #使用单表repo获取用户数据
+            # user = await user_single_repo.get_by_telegram_id(telegram_id)
+            # self.logger.info(f"[UserService] 使用单表repo获取用户数据: {user}")
+            
+            # 使用组合repo获取用户数据
+            self.logger.info(f"🔍 [UserService] 准备调用组合repo.get_by_telegram_id(telegram_id={telegram_id})")
             user = await self.user_repo.get_by_telegram_id(telegram_id)
+            self.logger.info(f"🔍 [UserService] 组合repo调用完成，返回数据: {user}")
+            self.logger.info(f"[UserService] 使用组合repo获取用户数据: {user}")
+            
             if user:
                 self.logger.info(f"[UserService] 获取用户成功: telegram_id={telegram_id}, user_id={user.get('id')}, uid={user.get('uid')}")
             else:

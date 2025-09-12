@@ -93,6 +93,9 @@ class UserCommandHandler(BaseCommandHandler):
     @safe_command_handler
     async def handle_help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理/help命令"""
+        user_id = update.effective_user.id
+        self.logger.info(f"🔍 [HELP_COMMAND] handle_help_command 开始执行，用户ID: {user_id}")
+        
         help_text = f"""
 🤖 **AI图像生成机器人使用指南**
 
@@ -122,7 +125,10 @@ class UserCommandHandler(BaseCommandHandler):
 如有问题请联系客服 👨‍💻
         """
 
+        self.logger.info(f"🔍 [HELP_COMMAND] 准备发送帮助文本给用户")
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+        self.logger.info(f"✅ [HELP_COMMAND] 已回复用户帮助信息")
+
     
     @safe_command_handler
     async def handle_myid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

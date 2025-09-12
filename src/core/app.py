@@ -34,7 +34,7 @@ class Application:
         
         try:
             # 初始化数据库
-            db_manager = self.container.get("database_manager")
+            db_manager = self.container.get("supabase_manager")
             await db_manager.initialize()
             self.logger.info("数据库初始化完成")
             

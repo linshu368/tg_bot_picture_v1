@@ -8,6 +8,7 @@ v2版本变化：
 3. 业务逻辑分离：积分管理→钱包表，统计信息→统计表
 """
 
+import asyncio
 import random
 import string
 from typing import Dict, Any, List, Optional
@@ -102,19 +103,43 @@ class UserRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
     async def get_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
         """根据Telegram ID获取用户"""
         try:
-            self.logger.debug(f"[UserRepositoryV2] get_by_telegram_id 查询: telegram_id={telegram_id}")
+            self.logger.info(f"🔍 [UserRepositoryV2] 开始执行 get_by_telegram_id: telegram_id={telegram_id}")
+            
+            # 步骤1: 获取数据库客户端
+            self.logger.info(f"🔧 [UserRepositoryV2] 步骤1: 调用 get_client()")
             client = self.get_client()
+            self.logger.info(f"✅ [UserRepositoryV2] 步骤1完成: get_client() 成功获取客户端")
+            
+            # 步骤2: 构建查询参数
+            self.logger.info(f"🔧 [UserRepositoryV2] 步骤2: 构建查询参数 - 表名={self.table_name}, 查询字段=*, 条件=telegram_id={telegram_id}")
+            
+            # 步骤3: 执行数据库查询
+            self.logger.info(f"🔧 [UserRepositoryV2] 步骤3: 开始执行数据库查询")
             result = client.table(self.table_name).select('*').eq('telegram_id', telegram_id).execute()
+            #用 asyncio.to_thread() 包裹
+            # result = await asyncio.to_thread(
+            #     lambda: client.table(self.table_name).select('*').eq('telegram_id', telegram_id).execute()
+            # )
+            self.logger.info(f"✅ [UserRepositoryV2] 步骤3完成: 数据库查询执行完成")
+            
+            # 步骤4: 处理查询结果
+            self.logger.info(f"🔧 [UserRepositoryV2] 步骤4: 处理查询结果")
+            self.logger.info(f"📊 [UserRepositoryV2] 查询结果详情: result.data存在={result.data is not None}, 数据条数={len(result.data) if result.data else 0}")
             
             if result.data and len(result.data) > 0:
                 user = result.data[0]
-                self.logger.info(f"[UserRepositoryV2] 命中用户: id={user.get('id')}, uid={user.get('uid')}")
+                self.logger.info(f"✅ [UserRepositoryV2] 步骤4完成: 成功找到用户")
+                self.logger.info(f"👤 [UserRepositoryV2] 用户详情: id={user.get('id')}, uid={user.get('uid')}, username={user.get('username')}")
+                self.logger.info(f"🎯 [UserRepositoryV2] get_by_telegram_id 执行成功，返回用户数据")
                 return user
-            self.logger.info(f"[UserRepositoryV2] 未找到用户: telegram_id={telegram_id}")
+            
+            self.logger.info(f"❌ [UserRepositoryV2] 步骤4完成: 未找到匹配的用户")
+            self.logger.info(f"🎯 [UserRepositoryV2] get_by_telegram_id 执行完成，返回 None (用户不存在): telegram_id={telegram_id}")
             return None
             
         except Exception as e:
-            self.logger.error(f"根据Telegram ID获取用户失败: {e}")
+            self.logger.error(f"💥 [UserRepositoryV2] get_by_telegram_id 执行失败: {e}")
+            self.logger.error(f"💥 [UserRepositoryV2] 异常详情: telegram_id={telegram_id}, 错误类型={type(e).__name__}")
             return None
     
     async def get_by_uid(self, uid: str) -> Optional[Dict[str, Any]]:

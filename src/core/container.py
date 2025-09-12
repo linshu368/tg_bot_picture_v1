@@ -212,7 +212,8 @@ def setup_container(settings) -> Container:
         service = UserService(
             user_composite_repo=c.get("user_composite_repository"),
             point_composite_repo=c.get("point_composite_repository"),
-            credit_settings=c.get("settings").credit
+            credit_settings=c.get("settings").credit,
+            supabase_manager=c.get("supabase_manager")  # 为性能测试注入supabase_manager
         )
         service.logger.info("🔧 UserService: 迁移完成 - 使用组合Repository")
         return service

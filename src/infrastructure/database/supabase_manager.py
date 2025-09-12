@@ -47,8 +47,11 @@ class SupabaseManager:
     
     def get_client(self) -> Client:
         """获取Supabase客户端"""
+        self.logger.info(f"[SupabaseManager] 开始 get_client()")
         if not self._client:
+            self.logger.error(f"[SupabaseManager] 客户端未初始化")
             raise RuntimeError("Supabase客户端未初始化")
+        self.logger.info(f"[SupabaseManager] 返回客户端实例")
         return self._client
     
     def get_beijing_time(self, dt: datetime = None) -> datetime:

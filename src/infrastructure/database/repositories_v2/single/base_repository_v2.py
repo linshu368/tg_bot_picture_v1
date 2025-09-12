@@ -38,7 +38,11 @@ class BaseRepositoryV2(ABC, Generic[T]):
     
     def get_client(self):
         """获取Supabase客户端"""
-        return self.supabase_manager.get_client()
+        self.logger.info(f"[BaseRepositoryV2] 开始 get_client()")
+        self.logger.info(f"[BaseRepositoryV2] 调用 supabase_manager.get_client()")
+        client = self.supabase_manager.get_client()
+        self.logger.info(f"[BaseRepositoryV2] supabase_manager.get_client() 完成")
+        return client
     
     @abstractmethod
     async def create(self, data: Dict[str, Any]) -> T:

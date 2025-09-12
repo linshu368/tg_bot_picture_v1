@@ -18,7 +18,6 @@ from src.utils.config.app_config import (
     UID_PREFIX, UID_LENGTH
 )
 
-from src.interfaces.telegram.flow_logger import FlowLogger
 
 
 
@@ -45,28 +44,18 @@ class MessageHandler:
         user = update.effective_user
         
         try:
-            # 获取或创建用户会话与行为记录放后台，避免阻塞首响
-            async def _background_photo_side_effects(telegram_user_id: int):
-                try:
-                    user_data_inner = await self._safe_get_user(telegram_user_id)
-                    if not user_data_inner:
-                        return
-                    session_inner = await self.session_service.get_or_create_session(user_data_inner['id'])
-                    if not session_inner:
-                        return
+            # 获取或创建用户会话
+            user_data = await self._safe_get_user(user.id)
+            if user_data:
+                session = await self.session_service.get_or_create_session(user_data['id'])
+                if session:
+                    # 记录用户行为：发送图片
                     await self.action_record_service.record_action(
-                        user_id=user_data_inner['id'],
-                        session_id=session_inner['session_id'],
+                        user_id=user_data['id'],
+                        session_id=session['session_id'],
                         action_type='send_photo',
                         message_context='用户发送图片消息'
                     )
-                except Exception as e:
-                    self.logger.error(f"照片消息副作用失败(后台): {e}")
-
-            try:
-                asyncio.create_task(_background_photo_side_effects(user.id))
-            except Exception as e:
-                self.logger.error(f"调度照片副作用后台任务失败: {e}")
             
             # 获取用户信息
             user_data = await self._safe_get_user(user.id)
@@ -95,10 +84,8 @@ class MessageHandler:
         """处理文本消息"""
         text = update.message.text
         user = update.effective_user
-        
-        # ==== 新增：创建 FlowLogger ====
-        flow = FlowLogger("TEXT_MESSAGE_FLOW", user.id if user else None)
-        flow.log(f"收到文本消息: {text}")
+        self.logger.info("### 当前运行的是已注释版 handle_text_message ###")
+
 
         try:
             # 先获取用户信息，避免重复调用
@@ -107,34 +94,34 @@ class MessageHandler:
             self.logger.info(f"_safe_get_user 返回: {'OK' if user_data else 'None'}")
             
             # 会话创建与行为记录放后台，避免阻塞首响
-            async def _background_text_side_effects(user_data_inner: dict, preview_text: str):
-                try:
-                    if not user_data_inner:
-                        self.logger.info("[TEXT_BG] 用户数据为空，跳过后台任务")
-                        return
-                    self.logger.info(f"[TEXT_BG] 使用已获取的用户数据: user_id={user_data_inner['id']}")
-                    self.logger.info(f"[TEXT_BG] 调用 get_or_create_session(user_id={user_data_inner['id']})")
-                    session_inner = await self.session_service.get_or_create_session(user_data_inner['id'])
-                    self.logger.info(f"[TEXT_BG] get_or_create_session 返回: {session_inner.get('session_id') if session_inner else 'None'}")
-                    if not session_inner:
-                        return
-                    short = preview_text[:50] + '...' if len(preview_text) > 50 else preview_text
-                    self.logger.info(f"[TEXT_BG] 调用 record_action(user_id={user_data_inner['id']}, action_type='send_text')")
-                    await self.action_record_service.record_action(
-                        user_id=user_data_inner['id'],
-                        session_id=session_inner['session_id'],
-                        action_type='send_text',
-                        message_context=f'用户发送文本: {short}'
-                    )
-                    self.logger.info("[TEXT_BG] record_action 完成")
-                except Exception as e:
-                    self.logger.error(f"文本消息副作用失败(后台): {e}")
+            # async def _background_text_side_effects(user_data_inner: dict, preview_text: str):
+            #     try:
+            #         if not user_data_inner:
+            #             self.logger.info("[TEXT_BG] 用户数据为空，跳过后台任务")
+            #             return
+            #         self.logger.info(f"[TEXT_BG] 使用已获取的用户数据: user_id={user_data_inner['id']}")
+            #         self.logger.info(f"[TEXT_BG] 调用 get_or_create_session(user_id={user_data_inner['id']})")
+            #         session_inner = await self.session_service.get_or_create_session(user_data_inner['id'])
+            #         self.logger.info(f"[TEXT_BG] get_or_create_session 返回: {session_inner.get('session_id') if session_inner else 'None'}")
+            #         if not session_inner:
+            #             return
+            #         short = preview_text[:50] + '...' if len(preview_text) > 50 else preview_text
+            #         self.logger.info(f"[TEXT_BG] 调用 record_action(user_id={user_data_inner['id']}, action_type='send_text')")
+            #         await self.action_record_service.record_action(
+            #             user_id=user_data_inner['id'],
+            #             session_id=session_inner['session_id'],
+            #             action_type='send_text',
+            #             message_context=f'用户发送文本: {short}'
+            #         )
+            #         self.logger.info("[TEXT_BG] record_action 完成")
+            #     except Exception as e:
+            #         self.logger.error(f"文本消息副作用失败(后台): {e}")
 
-            try:
-                # 传递已获取的用户数据，避免重复查询
-                asyncio.create_task(_background_text_side_effects(user_data, text))
-            except Exception as e:
-                self.logger.error(f"调度文本副作用后台任务失败: {e}")
+            # try:
+            #     # 传递已获取的用户数据，避免重复查询
+            #     asyncio.create_task(_background_text_side_effects(user_data, text))
+            # except Exception as e:
+            #     self.logger.error(f"调度文本副作用后台任务失败: {e}")
             
             # 检查用户状态 - 如果正在等待UID输入
             self.logger.info(f"获取用户状态: get_current_state(user_id={user.id})")
@@ -173,9 +160,6 @@ class MessageHandler:
         except Exception as e:
             self.logger.error(f"处理文本消息失败: {e}")
             await self._handle_text_message_error(update, user.id, e)
-        # ==== 新增：链路结束 ====  
-        finally:
-            flow.done()
 
     async def _safe_get_user(self, user_id: int):
         """安全获取用户信息"""
@@ -191,11 +175,10 @@ class MessageHandler:
             self.logger.error(f"获取用户信息失败: {user_id}, 错误: {e}")
             return None
 
-    async def _handle_button_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str,flow_logger=None):
+    async def _handle_button_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
         """分发按钮处理，每个功能独立错误处理"""
+        self.logger.info(f"🔍 [BUTTON_DISPATCH] 开始处理文本按钮: '{text}'")
         
-        if flow_logger:
-            flow_logger.log(f"进入按钮分发: {text}")
         # 检查用户是否处于等待UID输入状态，如果点击的不是找回账号按钮，则清除该状态
         # 这样用户可以正常使用其他功能，不会被卡在UID验证状态
         user_id = update.effective_user.id
@@ -218,8 +201,10 @@ class MessageHandler:
         }
         
         if text in function_map:
-            await self._safe_handle_function(function_map[text], update, context,flow_logger=flow_logger)
+            self.logger.info(f"🔍 [BUTTON_DISPATCH] 匹配到功能按钮: '{text}' -> {function_map[text].__name__}")
+            await self._safe_handle_function(function_map[text], update, context)
         else:
+            self.logger.info(f"🔍 [BUTTON_DISPATCH] 未匹配到功能按钮: '{text}'，发送默认提示")
             # 默认提示
             await update.message.reply_text(
                 "💡 发送图片开始AI处理，或使用底部菜单功能：\n\n"
@@ -229,19 +214,16 @@ class MessageHandler:
                 "🛒 /buy - 购买积分"
             )
 
-    async def _safe_handle_function(self, func, update, context, *args, flow_logger=None):
+    async def _safe_handle_function(self, func, update, context, *args):
         """安全执行功能函数，提供独立的错误处理"""
+        function_name = getattr(func, '__name__', '未知功能')
+        self.logger.info(f"🔍 [SAFE_HANDLE] 开始执行功能: {function_name}")
         try:
-            if flow_logger:
-                flow_logger.log(f"进入功能处理: {getattr(func, '__name__', '未知功能')}")
+            await func(update, context, *args)
+            self.logger.info(f"🔍 [SAFE_HANDLE] 功能执行完成: {function_name}")
 
-            await func(update, context, *args,flow_logger=flow_logger)
-
-            if flow_logger:
-                flow_logger.log(f"完成功能处理: {getattr(func, '__name__', '未知功能')}")
         except Exception as e:
-            function_name = getattr(func, '__name__', '未知功能')
-            self.logger.error(f"功能 {function_name} 执行失败: {e}")
+            self.logger.error(f"🔍 [SAFE_HANDLE] 功能 {function_name} 执行失败: {e}")
             
             # 根据功能类型提供不同的错误处理
             error_message = self._get_function_error_message(function_name)
@@ -427,17 +409,17 @@ class MessageHandler:
         user_handler = UserCommandHandler(self.bot)
         await user_handler.handle_recover_command(update, context)
 
-    async def _handle_help_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE,flow_logger=None):
+    async def _handle_help_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理帮助按钮"""
-        if flow_logger:
-            flow_logger.log("进入帮助按钮处理")
+        self.logger.info("🔍 [HELP_BUTTON] _handle_help_button 被调用")
 
         from .command.user_commands import UserCommandHandler
+        self.logger.info("🔍 [HELP_BUTTON] 创建 UserCommandHandler 实例")
         user_handler = UserCommandHandler(self.bot)
-        await user_handler.handle_help_command(update, context,flow_logger=flow_logger)
+        self.logger.info("🔍 [HELP_BUTTON] 准备调用 handle_help_command")
+        await user_handler.handle_help_command(update, context)
+        self.logger.info("🔍 [HELP_BUTTON] handle_help_command 调用完成")
 
-        if flow_logger:
-            flow_logger.log("帮助按钮处理完成")
 
     async def _process_uid_recovery(self, update: Update, context: ContextTypes.DEFAULT_TYPE, uid: str):
         """处理UID找回逻辑"""
