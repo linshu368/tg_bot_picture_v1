@@ -154,7 +154,7 @@ class UserSessionRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:

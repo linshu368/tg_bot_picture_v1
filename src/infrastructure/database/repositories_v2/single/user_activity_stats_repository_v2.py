@@ -12,6 +12,7 @@ v2版本特点：
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from .base_repository_v2 import BaseRepositoryV2
+import asyncio
 
 
 class UserActivityStatsRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
@@ -52,8 +53,10 @@ class UserActivityStatsRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(stats_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 插入数据（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_stats = result.data[0]
@@ -70,7 +73,9 @@ class UserActivityStatsRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据ID获取活动统计记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', stats_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', stats_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -84,7 +89,9 @@ class UserActivityStatsRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据用户ID获取活动统计记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('user_id', user_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('user_id', user_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -110,8 +117,10 @@ class UserActivityStatsRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', stats_id).execute()
+            # 执行更新（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', stats_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"活动统计更新成功: stats_id={stats_id}")
@@ -150,7 +159,7 @@ class UserActivityStatsRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -245,7 +254,7 @@ class UserActivityStatsRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:

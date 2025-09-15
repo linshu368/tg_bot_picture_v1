@@ -125,7 +125,7 @@ class PointRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -152,7 +152,7 @@ class PointRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             elif offset is not None:
                 query = query.range(offset, offset + 999)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -186,7 +186,7 @@ class PointRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             
             query = query.order('created_at', desc=True)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:

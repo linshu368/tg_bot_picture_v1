@@ -12,6 +12,7 @@ v2版本特点：
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from .base_repository_v2 import BaseRepositoryV2
+import asyncio
 
 
 class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
@@ -55,8 +56,10 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(session_record_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 插入数据（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_record = result.data[0]
@@ -73,7 +76,9 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据ID获取会话记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', record_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -87,7 +92,9 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据session_id获取会话记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('session_id', session_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('session_id', session_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -116,8 +123,10 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', record_id).execute()
+            # 执行更新（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"会话记录更新成功: record_id={record_id}")
@@ -142,7 +151,7 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -166,7 +175,7 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -183,7 +192,7 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
                 query = query.eq('user_id', user_id)
                 
             query = query.order('started_at', desc=True)
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -254,7 +263,7 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
                     .eq('user_id', user_id)
                     .gte('created_at', from_date))
                     
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             records = result.data or []
             
             # 统计信息
@@ -289,8 +298,10 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             client = self.get_client()
             cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
             
-            # 查找旧记录
-            result = client.table(self.table_name).select('id').lt('created_at', cutoff_date).execute()
+            # 查找旧记录（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('id').lt('created_at', cutoff_date).execute()
+            )
             old_records = result.data or []
             
             if not old_records:
@@ -298,8 +309,10 @@ class SessionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             
             old_ids = [r['id'] for r in old_records]
             
-            # 批量删除
-            delete_result = client.table(self.table_name).delete().in_('id', old_ids).execute()
+            # 批量删除（后台线程执行，避免阻塞事件循环）
+            delete_result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).delete().in_('id', old_ids).execute()
+            )
             deleted_count = len(delete_result.data) if delete_result.data else 0
             
             self.logger.info(f"清理旧会话记录成功: count={deleted_count}, days={days}")

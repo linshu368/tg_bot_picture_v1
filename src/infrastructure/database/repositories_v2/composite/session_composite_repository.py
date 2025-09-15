@@ -122,9 +122,12 @@ class SessionCompositeRepository:
 
                 async def _background_record_and_stats():
                     try:
-                        created_record = await self.record_repo.create(record_data)
-                        # 注意：后台任务不纳入回滚
-                        await self.stats_repo.increment_session_count(user_id)
+                        # 并行执行会话记录创建和统计更新
+                        await asyncio.gather(
+                            self.record_repo.create(record_data),
+                            self.stats_repo.increment_session_count(user_id),
+                            return_exceptions=True
+                        )
                     except Exception as bg_err:
                         self.logger.error(f"创建会话记录/更新统计失败(后台): {bg_err}")
 
@@ -314,49 +317,96 @@ class SessionCompositeRepository:
     
     # ==================== 查询接口（兼容旧版） ====================
     
-    async def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """获取完整会话信息
+    async def get_session_info(self, session_id: str) -> Dict[str, Any]:
+        """获取完整会话信息 (优化版 - 正确的并行查询策略)
         
-        聚合查询：会话关联 + 详细记录
+        业务逻辑分析：
+        1. 必须先查询会话关联获取user_id（串行）
+        2. 基于user_id，并行查询会话记录和用户统计（并行）
+        3. 返回标准化格式供SessionService使用
         """
         try:
-            # 获取会话关联信息
+            # 第一步：查询会话关联（必须串行，需要user_id）
             session_association = await self.session_repo.get_by_session_id(session_id)
-            if not session_association:
-                return None
             
-            # 获取会话详细记录
-            session_record = await self.record_repo.find_one(session_id=session_id)
-            # 获取用户活动统计（用于last_active_time）
-            user_stats = None
-            try:
-                user_stats = await self.stats_repo.get_by_user_id(session_association['user_id'])
-            except Exception as _:
+            if not session_association:
+                self.logger.debug(f"会话关联不存在: session_id={session_id}")
+                return self._standardize_error_response(
+                    success=False,
+                    message=f"会话不存在: {session_id}",
+                    data=None
+                )
+            
+            user_id = session_association['user_id']
+            
+            # 第二步：基于user_id并行查询会话记录和用户统计
+            session_record, user_stats = await asyncio.gather(
+                self.record_repo.find_one(session_id=session_id),
+                self._safe_get_user_stats_by_id(user_id),
+                return_exceptions=True
+            )
+            
+            # 处理会话记录查询结果
+            if isinstance(session_record, Exception):
+                self.logger.warning(f"获取会话记录失败: {session_record}")
+                session_record = None
+            
+            # 处理用户统计查询结果
+            if isinstance(user_stats, Exception):
+                self.logger.warning(f"获取用户统计失败: {user_stats}")
                 user_stats = None
             
-            # 聚合数据
+            # 第三步：聚合数据
             session_info = {
                 'id': session_association['id'],
-                'user_id': session_association['user_id'],
+                'user_id': user_id,
                 'session_id': session_id
             }
             
-            # 合并会话记录数据
+            # 合并会话记录数据（包含ended_at, started_at等关键字段）
             if session_record:
                 session_info.update(session_record)
             
-            # 合并用户统计的最后活跃时间
-            if user_stats and user_stats.get('last_active_time'):
-                session_info['last_active_time'] = user_stats.get('last_active_time')
+            # 合并用户统计数据（包含last_active_time等）
+            if user_stats:
+                if user_stats.get('last_active_time'):
+                    session_info['last_active_time'] = user_stats.get('last_active_time')
+                if user_stats.get('session_count'):
+                    session_info['user_total_sessions'] = user_stats.get('session_count')
+                if user_stats.get('total_messages_sent'):
+                    session_info['user_total_messages'] = user_stats.get('total_messages_sent')
             
-            return session_info
+            self.logger.debug(f"获取会话信息成功: session_id={session_id}, user_id={user_id}")
+            
+            return self._standardize_error_response(
+                success=True,
+                message="获取会话信息成功",
+                data=session_info
+            )
             
         except Exception as e:
             self.logger.error(f"获取会话信息失败: {e}")
+            return self._standardize_error_response(
+                success=False,
+                message=f"获取会话信息失败: {str(e)}",
+                data=None
+            )
+    
+    async def _safe_get_user_stats_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """安全地根据user_id获取用户统计信息"""
+        try:
+            return await self.stats_repo.get_by_user_id(user_id)
+        except Exception as e:
+            self.logger.warning(f"获取用户统计信息失败: {e}")
             return None
     
-    async def get_user_sessions(self, user_id: int, limit: int = 10, include_records: bool = True) -> List[Dict[str, Any]]:
-        """获取用户会话列表
+    async def get_user_sessions(self, user_id: int, limit: int = 10, include_records: bool = True) -> Dict[str, Any]:
+        """获取用户会话列表 (优化版 - 解决N+1查询问题)
+        
+        优化策略：
+        1. 先获取用户会话关联列表
+        2. 如果需要详细记录，使用asyncio.gather并行查询所有记录
+        3. 避免循环中的串行查询，实现真正的并行优化
         
         Args:
             user_id: 用户ID  
@@ -364,42 +414,77 @@ class SessionCompositeRepository:
             include_records: 是否包含详细记录
             
         Returns:
-            会话列表
+            标准化响应格式 {success, message, data}
         """
         try:
-            # 获取用户会话关联
+            # 第一步：获取用户会话关联列表
             sessions = await self.session_repo.get_user_sessions(user_id, limit)
             
+            if not sessions:
+                self.logger.debug(f"用户无会话记录: user_id={user_id}")
+                return self._standardize_error_response(
+                    success=True,
+                    message="用户无会话记录",
+                    data=[]
+                )
+            
             if not include_records:
-                return sessions
+                return self._standardize_error_response(
+                    success=True,
+                    message="获取用户会话列表成功",
+                    data=sessions
+                )
             
-            # 批量获取会话记录
+            # 第二步：并行获取所有会话记录，彻底解决N+1查询问题
             session_ids = [s['session_id'] for s in sessions]
-            records = {}
             
-            for session_id in session_ids:
-                record = await self.record_repo.find_one(session_id=session_id)
-                if record:
-                    records[session_id] = record
+            self.logger.debug(f"开始并行查询 {len(session_ids)} 个会话记录")
             
-            # 合并数据
-            result = []
+            # 使用asyncio.gather一次性并行查询所有会话记录
+            record_tasks = [
+                self.record_repo.find_one(session_id=session_id) 
+                for session_id in session_ids
+            ]
+            
+            # 并行执行所有查询，大幅提升性能
+            record_results = await asyncio.gather(*record_tasks, return_exceptions=True)
+            
+            # 第三步：构建高效的记录映射表
+            records_map = {}
+            for i, session_id in enumerate(session_ids):
+                result = record_results[i]
+                if isinstance(result, Exception):
+                    self.logger.warning(f"获取会话记录失败 session_id={session_id}: {result}")
+                elif result:
+                    records_map[session_id] = result
+            
+            # 第四步：高效合并数据
+            merged_sessions = []
             for session in sessions:
                 session_id = session['session_id']
-                merged_session = {
-                    **session,
-                    **records.get(session_id, {})
-                }
-                result.append(merged_session)
+                record_data = records_map.get(session_id, {})
+                
+                # 合并会话关联数据和详细记录数据
+                merged_session = {**session, **record_data}
+                merged_sessions.append(merged_session)
             
-            return result
+            self.logger.debug(f"获取用户会话列表成功: user_id={user_id}, 会话数量={len(merged_sessions)}, 记录数量={len(records_map)}")
+            return self._standardize_error_response(
+                success=True,
+                message="获取用户会话列表成功",
+                data=merged_sessions
+            )
             
         except Exception as e:
             self.logger.error(f"获取用户会话列表失败: {e}")
-            return []
+            return self._standardize_error_response(
+                success=False,
+                message=f"获取用户会话列表失败: {str(e)}",
+                data=[]
+            )
     
     async def get_user_session_stats(self, user_id: int, days: int = 30) -> Dict[str, Any]:
-        """获取用户会话统计
+        """获取用户会话统计 (优化版 - 并行查询)
         
         Args:
             user_id: 用户ID
@@ -409,11 +494,22 @@ class SessionCompositeRepository:
             统计信息
         """
         try:
-            # 获取会话记录统计
-            record_stats = await self.record_repo.get_session_stats(user_id, days)
+            # 并行获取会话记录统计和用户活动统计
+            record_stats, user_stats = await asyncio.gather(
+                self.record_repo.get_session_stats(user_id, days),
+                self.stats_repo.get_by_user_id(user_id),
+                return_exceptions=True
+            )
             
-            # 获取用户活动统计
-            user_stats = await self.stats_repo.get_by_user_id(user_id)
+            # 处理会话记录统计结果
+            if isinstance(record_stats, Exception):
+                self.logger.warning(f"获取会话记录统计失败: {record_stats}")
+                record_stats = {}
+            
+            # 处理用户活动统计结果
+            if isinstance(user_stats, Exception):
+                self.logger.warning(f"获取用户活动统计失败: {user_stats}")
+                user_stats = None
             
             # 合并统计信息
             combined_stats = {
@@ -426,34 +522,86 @@ class SessionCompositeRepository:
                 'last_active_time': user_stats.get('last_active_time') if user_stats else None
             }
             
-            return combined_stats
+            return self._standardize_error_response(
+                success=True,
+                message="获取用户会话统计成功",
+                data=combined_stats
+            )
             
         except Exception as e:
             self.logger.error(f"获取用户会话统计失败: {e}")
-            return {}
+            return self._standardize_error_response(
+                success=False,
+                message=f"获取用户会话统计失败: {str(e)}",
+                data={}
+            )
     
-    async def get_active_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """获取活跃会话（未结束的会话）"""
+    async def get_active_sessions(self, limit: int = 50) -> Dict[str, Any]:
+        """获取活跃会话（未结束的会话） (优化版 - 并行查询，解决N+1问题)
+
+        Returns:
+            标准化响应格式 {success, message, data}
+        """
         try:
             # 查询未结束的会话记录
             records = await self.record_repo.find_many(ended_at=None, limit=limit)
             
-            # 获取对应的会话关联信息并合并
+            if not records:
+                return self._standardize_error_response(
+                    success=True,
+                    message="当前无活跃会话",
+                    data=[]
+                )
+            
+            # 并行获取所有会话关联信息，解决N+1查询问题
+            session_ids = [record['session_id'] for record in records]
+            
+            # 使用asyncio.gather并行查询所有会话关联
+            association_tasks = [
+                self.session_repo.get_by_session_id(session_id) 
+                for session_id in session_ids
+            ]
+            
+            # 并行执行所有查询
+            association_results = await asyncio.gather(*association_tasks, return_exceptions=True)
+            
+            # 构建关联映射表
+            associations = {}
+            for i, session_id in enumerate(session_ids):
+                result = association_results[i]
+                if isinstance(result, Exception):
+                    self.logger.warning(f"获取会话关联失败 session_id={session_id}: {result}")
+                elif result:
+                    associations[session_id] = result
+            
+            # 合并数据
             result = []
             for record in records:
-                session_association = await self.session_repo.get_by_session_id(record['session_id'])
-                if session_association:
+                session_id = record['session_id']
+                association = associations.get(session_id)
+                if association:
                     merged_session = {
-                        **session_association,
+                        **association,
                         **record
                     }
                     result.append(merged_session)
+                else:
+                    self.logger.warning(f"找不到会话关联信息: session_id={session_id}")
             
-            return result
+            self.logger.debug(f"获取活跃会话成功: 活跃会话数量={len(result)}")
+            return self._standardize_error_response(
+                success=True,
+                message="获取活跃会话成功",
+                data=result
+            )
             
         except Exception as e:
             self.logger.error(f"获取活跃会话失败: {e}")
-            return []
+            return self._standardize_error_response(
+                success=False,
+                message=f"获取活跃会话失败: {str(e)}",
+                data=[]
+            )
     
     async def check_session_exists(self, session_id: str) -> bool:
         """检查会话是否存在"""

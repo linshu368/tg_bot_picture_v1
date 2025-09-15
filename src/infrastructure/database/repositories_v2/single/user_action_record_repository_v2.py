@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import uuid
 from .base_repository_v2 import BaseRepositoryV2
+import asyncio
 
 
 class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
@@ -62,8 +63,10 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(action_record_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 插入数据（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_record = result.data[0]
@@ -80,7 +83,9 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据ID获取行为记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', record_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -94,7 +99,9 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据action_id获取行为记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('action_id', action_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('action_id', action_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -123,8 +130,10 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', record_id).execute()
+            # 执行更新（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"行为记录更新成功: record_id={record_id}")
@@ -163,7 +172,7 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -187,7 +196,7 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -203,7 +212,7 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
                     .eq('session_id', session_id)
                     .order('action_time', desc=False))  # 按时间正序，展示行为流程
                     
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -226,7 +235,7 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -249,7 +258,7 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -288,7 +297,7 @@ class UserActionRecordRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
                     .eq('user_id', user_id)
                     .gte('action_time', from_date))
                     
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             records = result.data or []
             
             # 统计信息

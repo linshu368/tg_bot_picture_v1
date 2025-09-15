@@ -12,6 +12,7 @@ v2版本特点：
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date, timedelta
 from .base_repository_v2 import BaseRepositoryV2
+import asyncio
 
 
 class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
@@ -50,8 +51,10 @@ class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(checkin_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 插入数据（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_checkin = result.data[0]
@@ -68,7 +71,9 @@ class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据ID获取签到记录"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', checkin_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', checkin_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -82,11 +87,13 @@ class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据用户ID和日期获取签到记录"""
         try:
             client = self.get_client()
-            result = (client.table(self.table_name)
+            result = await asyncio.to_thread(
+                lambda: (client.table(self.table_name)
                      .select('*')
                      .eq('user_id', user_id)
                      .eq('checkin_date', checkin_date)
                      .execute())
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -115,8 +122,10 @@ class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', checkin_id).execute()
+            # 执行更新（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', checkin_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"签到记录更新成功: checkin_id={checkin_id}")
@@ -141,7 +150,7 @@ class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -165,7 +174,7 @@ class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -227,7 +236,7 @@ class DailyCheckinRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
                     .eq('user_id', user_id)
                     .gte('checkin_date', from_date))
                     
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             checkins = result.data or []
             
             # 统计信息

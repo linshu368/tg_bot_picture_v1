@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 from .base_repository_v2 import BaseRepositoryV2
+import asyncio
 
 
 class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
@@ -58,8 +59,10 @@ class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备插入数据
             prepared_data = self._prepare_data_for_insert(order_data)
             
-            # 插入数据
-            result = client.table(self.table_name).insert(prepared_data).execute()
+            # 插入数据（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).insert(prepared_data).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 created_order = result.data[0]
@@ -76,7 +79,9 @@ class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据记录ID获取支付订单"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('id', order_record_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('id', order_record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -90,7 +95,9 @@ class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
         """根据order_id获取支付订单"""
         try:
             client = self.get_client()
-            result = client.table(self.table_name).select('*').eq('order_id', order_id).execute()
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).select('*').eq('order_id', order_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -119,8 +126,10 @@ class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             # 准备更新数据
             prepared_data = self._prepare_data_for_update(update_data)
             
-            # 执行更新
-            result = client.table(self.table_name).update(prepared_data).eq('id', order_record_id).execute()
+            # 执行更新（后台线程执行，避免阻塞事件循环）
+            result = await asyncio.to_thread(
+                lambda: client.table(self.table_name).update(prepared_data).eq('id', order_record_id).execute()
+            )
             
             if result.data and len(result.data) > 0:
                 self.logger.info(f"支付订单更新成功: order_record_id={order_record_id}")
@@ -221,7 +230,7 @@ class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             query = self._build_supabase_filters(query, conditions)
             query = query.limit(1)
             
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             
             if result.data and len(result.data) > 0:
                 return result.data[0]
@@ -245,7 +254,7 @@ class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
@@ -268,7 +277,7 @@ class PaymentOrderRepositoryV2(BaseRepositoryV2[Dict[str, Any]]):
             if limit is not None:
                 query = query.limit(limit)
                 
-            result = query.execute()
+            result = await asyncio.to_thread(lambda: query.execute())
             return result.data or []
             
         except Exception as e:
