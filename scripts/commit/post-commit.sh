@@ -2,7 +2,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-CONFIG="$REPO_ROOT/gpt/prompt/config.yaml"
 PY_BIN="$REPO_ROOT/venv/bin/python"
 [ -x "$PY_BIN" ] || PY_BIN="python3"
 
@@ -13,7 +12,6 @@ git show "$COMMIT_ID" --pretty=format: > "$DIFF_FILE"
 
 # 调用 Python 生成 JSON（不保存文件）
 OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
-  --prompt "$CONFIG" \
   --diff "$DIFF_FILE" \
   --commit-id "$COMMIT_ID")"
 

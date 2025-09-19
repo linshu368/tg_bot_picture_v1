@@ -18,6 +18,5 @@ do
     "$REPO_ROOT/venv/bin/python" scripts/push/gen_pushlog.py \
         --remote "$REMOTE" \
         --branch "$(git rev-parse --abbrev-ref HEAD)" \
-        --commits "$COMMITS" \
-        --prompt "$REPO_ROOT/gpt/prompt/config.yaml"
+        --commits "$COMMITS"
 done

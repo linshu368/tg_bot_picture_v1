@@ -3,7 +3,6 @@ set -euo pipefail
 
 COMMIT_MSG_FILE="${1:?usage: commit-msg .git/COMMIT_EDITMSG}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-CONFIG="$REPO_ROOT/gpt/prompt/config.yaml"
 
 DIFF_FILE="$(mktemp -t diff.XXXXXX.patch)"
 git diff --cached > "$DIFF_FILE"
@@ -20,7 +19,7 @@ fi
 
 # 调用 Python 脚本，生成 JSON
 OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
-  --prompt "$CONFIG" --diff "$DIFF_FILE")"
+  --diff "$DIFF_FILE")"
 
 # 取出 message
 raw_message="$(echo "$OUT_JSON" | jq -r '.message')"

@@ -2,7 +2,6 @@
 import argparse
 import json
 import sys
-import yaml
 import subprocess
 from pathlib import Path
 from datetime import datetime
@@ -14,44 +13,75 @@ from gpt.utils.direct_api import gptCaller
 from gpt.param import commit_process_diff_prompt_template
 
 
-def build_prompt(config_path: str, diff_file: str) -> str:
-    """基于模板 commit_msg.prompt 渲染 prompt"""
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
+def build_prompt(diff_content: str) -> str:
+    """基于模板 commit_process_diff.prompt 渲染 prompt"""
+    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+        project_arch = f.read()
+    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+        project_principle = f.read()
+    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
+        workstream_current_mission = f.read()
 
-    project_intro = (config.get("project") or {}).get("intro") or ""
-    current_mission = (config.get("workstream") or {}).get("current_mission") or ""
-    scope_guide = (config.get("workstream") or {}).get("change_scope_guide") or ""
-
-    with open(diff_file, "r", encoding="utf-8") as f:
-        diff_content = f.read()
-
-    prompt = (
-        commit_process_diff_prompt_template
-        .replace("{project.intro}", project_intro)
-        .replace("{workstream.current_mission}", current_mission)
-        .replace("{workstream.change_scope_guide}", scope_guide)
-        .replace("{git diff --cached}", diff_content)
+    prompt = commit_process_diff_prompt_template.format(
+        project_arch=project_arch,
+        project_principle=project_principle,
+        workstream_current_mission=workstream_current_mission,
+        git_push_commit_logs=diff_content,
     )
     return prompt
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prompt", required=True, help="路径: gpt/prompt/config.yaml")
     parser.add_argument("--diff", required=True, help="路径: 暂存区/commit diff 文件")
     parser.add_argument("--commit-id", required=False, help="指定 commit id（post-commit 阶段使用）")
     args = parser.parse_args()
+    
+#     # 调试用的硬编码值
+#     class DebugArgs:
+#         diff = "/tmp/test_diff.txt"  # 请替换为实际的测试 diff 文件路径
+#         commit_id = "debug_commit_123"
+    
+#     args = DebugArgs()
 
-    # 构造 prompt
-    prompt = build_prompt(args.prompt, args.diff)
+#     # 读取 diff 文件内容
+#     # 为了调试，如果文件不存在就创建一个测试内容
+#     try:
+#         with open(args.diff, "r", encoding="utf-8") as f:
+#             diff_content = f.read()
+#     except FileNotFoundError:
+#         # 如果文件不存在，使用测试内容
+#         diff_content = """
+# diff --git a/test.py b/test.py
+# index 1234567..abcdefg 100644
+# --- a/test.py
+# +++ b/test.py
+# @@ -1,3 +1,4 @@
+#  def hello():
+# +    # 添加了注释
+#      print("Hello World")
+#      return True
+# """
+#         print(f"警告: diff 文件 {args.diff} 不存在，使用测试内容")
+
+
+    # 构造 prompt  
+    prompt = build_prompt(args.diff)
+    
+    # # DEBUG: 打印 prompt 的前部分内容
+    # print("=== 生成的 Prompt (前500字符) ===")
+    # print(prompt[:500] + "..." if len(prompt) > 500 else prompt)
+    # print("=" * 50)
 
     gpt = gptCaller()
     try:
+        print("正在调用 AI 生成 commit 消息...")
         md = gpt.get_response(prompt)
         message = md
+        print("AI 生成成功!")
     except Exception as e:
         message = f"> AI 生成失败: {str(e)}"
+        print(f"AI 调用失败: {e}")
 
     # 元数据（commit_id 仅作透传，不做保存）
     commit_log = {

@@ -1,4 +1,4 @@
-import argparse, json, os, datetime, yaml, sys
+import argparse, json, os, datetime, sys
 from pathlib import Path
 import subprocess
 # 引入 gptCaller 与参数模板
@@ -10,7 +10,7 @@ from gpt.param import push_log_title_prompt_template
 from gpt.param import push_log_arch2pr_prompt_template
 
 
-def build_prompt(config_path: str, diff_content: str) -> str:
+def build_prompt(diff_content: str) -> str:
     """基于模板 push_msg.prompt 渲染 prompt"""
     with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
         project_arch = f.read()
@@ -62,7 +62,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--remote", required=True)
 parser.add_argument("--branch", required=True)
 parser.add_argument("--commits", required=True)
-parser.add_argument("--prompt", required=True, help="路径: gpt/prompt/config.yaml")
 args = parser.parse_args()
 
 commits = args.commits.split()
@@ -76,7 +75,7 @@ push_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 diff_content = collect_push_diff(args.remote, args.branch)
 
 # 构造 prompt
-prompt = build_prompt(args.prompt, diff_content)
+prompt = build_prompt(diff_content)
 
 # 调用 GPT（直接使用原始 Markdown 作为 message）
 gpt = gptCaller()
