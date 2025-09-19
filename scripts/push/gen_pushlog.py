@@ -12,11 +12,11 @@ from gpt.param import push_log_arch2pr_prompt_template
 
 def build_prompt(diff_content: str) -> str:
     """基于模板 push_msg.prompt 渲染 prompt"""
-    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
         project_arch = f.read()
-    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
         project_principle = f.read()
-    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
         workstream_current_mission = f.read()
 
     prompt = commit_process_diff_prompt_template.format(
@@ -30,13 +30,13 @@ def build_prompt(diff_content: str) -> str:
 
 def build_prompt_arch2pr(diff_content: str) -> str:
     """基于模板 push_log_pr2arch.prompt 渲染 prompt"""
-    with open("/home/tg_bot_picture_v1/gpt/solid_save/long/project_business_goal.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/long/project_business_goal.txt", "r", encoding="utf-8") as f:
         product_business_goal = f.read()
-    with open("/home/tg_bot_picture_v1/gpt/solid_save/mid/requirements_functional_spec.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/mid/requirements_functional_spec.txt", "r", encoding="utf-8") as f:
         requirements_functional_spec = f.read()
-    with open("/home/tg_bot_picture_v1/gpt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
         project_architecture = f.read()
-    with open("/home/tg_bot_picture_v1/gpt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
         project_principle = f.read()
 
     prompt = push_log_arch2pr_prompt_template.format(

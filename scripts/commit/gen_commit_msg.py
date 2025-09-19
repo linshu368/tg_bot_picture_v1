@@ -15,11 +15,11 @@ from gpt.param import commit_process_diff_prompt_template
 
 def build_prompt(diff_content: str) -> str:
     """基于模板 commit_process_diff.prompt 渲染 prompt"""
-    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
         project_arch = f.read()
-    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
         project_principle = f.read()
-    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
         workstream_current_mission = f.read()
 
     prompt = commit_process_diff_prompt_template.format(
