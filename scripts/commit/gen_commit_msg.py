@@ -65,8 +65,9 @@ def main():
 #         print(f"警告: diff 文件 {args.diff} 不存在，使用测试内容")
 
 
-    # 构造 prompt  
-    prompt = build_prompt(args.diff)
+    with open(args.diff, "r", encoding="utf-8") as f:
+            diff_content = f.read()
+    prompt = build_prompt(diff_content)
     
     # # DEBUG: 打印 prompt 的前部分内容
     # print("=== 生成的 Prompt (前500字符) ===")
