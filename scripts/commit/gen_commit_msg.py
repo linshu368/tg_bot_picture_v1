@@ -75,13 +75,14 @@ def main():
 
     gpt = gptCaller()
     try:
-        print("正在调用 AI 生成 commit 消息...")
+        # 输出调试信息到stderr，避免干扰JSON输出
+        print("正在调用 AI 生成 commit 消息...", file=sys.stderr)
         md = gpt.get_response(prompt)
         message = md
-        print("AI 生成成功!")
+        print("AI 生成成功!", file=sys.stderr)
     except Exception as e:
         message = f"> AI 生成失败: {str(e)}"
-        print(f"AI 调用失败: {e}")
+        print(f"AI 调用失败: {e}", file=sys.stderr)
 
     # 元数据（commit_id 仅作透传，不做保存）
     commit_log = {

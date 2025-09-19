@@ -2,9 +2,12 @@ from openai import OpenAI
 import requests
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
-# 加载 .env 文件
-load_dotenv()
+# 获取项目根目录路径并加载 .env 文件
+project_root = Path(__file__).resolve().parents[2]  # 从 gpt/utils/direct_api.py 向上两级到项目根目录
+env_path = project_root / '.env'
+load_dotenv(env_path)
 
 class gptCaller:
     def __init__(self):
@@ -13,6 +16,10 @@ class gptCaller:
         """
         # 从环境变量读取 API Key 和模型
         self.api_key = os.getenv("OPENAI_API_KEY")
+        
+        # 检查 API Key 是否正确加载
+        if not self.api_key:
+            raise ValueError(f"OPENAI_API_KEY 未找到！请检查 .env 文件是否存在于: {env_path}")
         # self.model =  "gpt-5-2025-08-07"
         self.model = "gpt-4.1"
         # self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 默认用 gpt-4o-mini
