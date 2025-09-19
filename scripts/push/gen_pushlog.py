@@ -74,7 +74,7 @@ push_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 # 收集本次push 的 diff 内容
 diff_content = collect_push_diff(args.remote, args.branch)
 
-# 构造 prompt
+# 构造 prompt（面向研发）
 prompt = build_prompt(diff_content)
 
 # 调用 GPT（直接使用原始 Markdown 作为 message）
@@ -84,6 +84,14 @@ gpt = gptCaller()
 # try:
 md = gpt.get_response(prompt)
 message = md
+
+# 🔹 新增：构造 prompt（面向产品）并调用 GPT
+try:
+    prompt_arch2pr = build_prompt_arch2pr(diff_content)
+    message_for_product = gpt.get_response(prompt_arch2pr)
+except Exception:
+    message_for_product = "未生成产品说明"  
+# ----------------------------
 
 
 # 🔹 第二次调用 GPT，生成 pushlog 目录名
@@ -103,7 +111,8 @@ pushlog = {
     "branch": args.branch,
     "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S %z"),
     "commits": commits,
-    "message": message,
+    "message": message,#工程侧
+    "message_for_product": message_for_product,#产品侧
     "dir_name": dir_name
 }
 
