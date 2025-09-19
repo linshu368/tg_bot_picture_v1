@@ -68,7 +68,8 @@
 
 ```
 ===================
-{project.intro}  
+{project_arch}    #架构背景
+{project_principle}  #原则与方法论
 ===================
 ```
 
@@ -78,8 +79,7 @@
 
 ```
 ===================
-{workstream.current_mission} 
-{workstream.change_scope_guide} 
+{workstream_current_mission} 
 ===================
 ```
 
@@ -89,7 +89,7 @@
 
 ```
 ===================
-{git diff --cached}
+{git_push_commit_logs}
 ===================
 ```
 

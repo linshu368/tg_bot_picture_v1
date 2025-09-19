@@ -7,44 +7,47 @@ sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
 from gpt.utils.direct_api import gptCaller
 from gpt.param import commit_process_diff_prompt_template 
 from gpt.param import push_log_title_prompt_template
+from gpt.param import push_log_arch2pr_prompt_template
 
 
 def build_prompt(config_path: str, diff_content: str) -> str:
     """基于模板 push_msg.prompt 渲染 prompt"""
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
+    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+        project_arch = f.read()
+    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+        project_principle = f.read()
+    with open("/Users/qj/python_project/tg_text_bot/gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
+        workstream_current_mission = f.read()
 
-    project_intro = (config.get("project") or {}).get("intro") or ""
-    current_mission = (config.get("workstream") or {}).get("current_mission") or ""
-    scope_guide = (config.get("workstream") or {}).get("change_scope_guide") or ""
-
-    prompt = (
-        commit_process_diff_prompt_template
-        .replace("{project.intro}", project_intro)
-        .replace("{workstream.current_mission}", current_mission)
-        .replace("{workstream.change_scope_guide}", scope_guide)
-        .replace("{git diff --cached}", diff_content)
+    prompt = commit_process_diff_prompt_template.format(
+        project_arch=project_arch,
+        project_principle=project_principle,
+        workstream_current_mission=workstream_current_mission,
+        git_push_commit_logs=diff_content,
     )
     return prompt
 
 
-# def parse_response(md: str):
-#     """解析 AI 返回的 markdown，提取 title + body"""
-#     lines = [l.strip() for l in md.splitlines() if l.strip()]
-#     title = ""
-#     body_lines = []
+def build_prompt_arch2pr(diff_content: str) -> str:
+    """基于模板 push_log_pr2arch.prompt 渲染 prompt"""
+    with open("/home/tg_bot_picture_v1/gpt/solid_save/long/project_business_goal.txt", "r", encoding="utf-8") as f:
+        product_business_goal = f.read()
+    with open("/home/tg_bot_picture_v1/gpt/solid_save/mid/requirements_functional_spec.txt", "r", encoding="utf-8") as f:
+        requirements_functional_spec = f.read()
+    with open("/home/tg_bot_picture_v1/gpt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+        project_architecture = f.read()
+    with open("/home/tg_bot_picture_v1/gpt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+        project_principle = f.read()
 
-#     for i, line in enumerate(lines):
-#         if line.startswith("# "):
-#             title = line[2:].strip()
-#             body_lines = lines[i + 1 :]
-#             break
+    prompt = push_log_arch2pr_prompt_template.format(
+        product_business_goal=product_business_goal,
+        requirements_functional_spec=requirements_functional_spec,
+        project_architecture=project_architecture,
+        project_principle=project_principle,
+        git_push_commit_logs=diff_content,
+    )
+    return prompt
 
-#     if not title and lines:
-#         title = lines[0]
-#         body_lines = lines[1:]
-
-#     return title, "\n".join(body_lines).strip()
 
 
 def collect_push_diff(remote: str, branch: str) -> str:
@@ -69,15 +72,6 @@ if not commits:
 # 生成 push_id
 push_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-# 读取 commitlog
-# commitlogs = []
-# for cid in commits:
-#     path = str(root_path / f"logs/snapshots/{cid}.json")
-#     if os.path.exists(path):
-#         with open(path) as f:
-#             commitlogs.append(json.load(f))
-
-# 🔹 AI 生成 message
 # 收集本次push 的 diff 内容
 diff_content = collect_push_diff(args.remote, args.branch)
 
@@ -91,20 +85,7 @@ gpt = gptCaller()
 # try:
 md = gpt.get_response(prompt)
 message = md
-# except Exception as e:
-   
-#     # if commitlogs:
-#     #     # commitlogs 里历史可能是对象或字符串，这里做兼容
-#     #     parts = []
-#     #     for c in commitlogs:
-#     #         m = c.get("message")
-#     #         if isinstance(m, dict):
-#     #             parts.append(m.get("title") or "")
-#     #         elif isinstance(m, str):
-#     #             parts.append(m)
-#     #     message = "\n".join([p for p in parts if p]) or "> fallback: no titles found"
-#     # else:
-#         message = "push update\nno commitlogs found"
+
 
 # 🔹 第二次调用 GPT，生成 pushlog 目录名
 try:
