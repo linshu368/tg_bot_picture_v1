@@ -14,7 +14,7 @@ class gptCaller:
         """
         初始化 OpenAI 聊天类
         """
-        # 从环境变量读取 API Key 和模型
+        # 从环境变量读取 API Key 和模型 
         self.api_key = os.getenv("OPENAI_API_KEY")
         
         # 检查 API Key 是否正确加载
