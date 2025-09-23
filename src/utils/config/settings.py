@@ -199,3 +199,29 @@ def get_settings() -> AppSettings:
         payment=payment_config,
         services=services_config  # 🔧 V2迁移：添加服务配置
     ) 
+
+
+# =============================
+# 文字 Bot 独立配置（与主项目隔离）
+# =============================
+@dataclass
+class TextBotSettings:
+    """文字 Bot 配置（独立于主 Bot）"""
+    token: str = "8423660455:AAFd5I5Ax3-gYZEqc_ZL05owE2lCyI5E2EM"
+    admin_user_id: int = 7116726082
+   
+
+
+@dataclass
+class TextAppSettings:
+    """文字 Bot 应用配置根对象"""
+    text_bot: TextBotSettings
+
+
+def get_text_settings() -> TextAppSettings:
+    """获取文字 Bot 配置，仅依赖 TEXT_BOT_* 环境变量"""
+    text_bot_config = TextBotSettings(
+        token=os.getenv("TEXT_BOT_TOKEN", ""),
+        admin_user_id=int(os.getenv("TEXT_BOT_ADMIN_USER_ID", "0"))
+    )
+    return TextAppSettings(text_bot=text_bot_config)
