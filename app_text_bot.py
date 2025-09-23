@@ -31,11 +31,11 @@ def main() -> None:
 
     try:
         from src.utils.config.settings import get_text_settings
-        from src.core.container import setup_text_container
-
+        
+        from src.interfaces.telegram.text_bot import TextBot
         settings = get_text_settings()
-        container = setup_text_container(settings)
-        text_bot = container.get("text_bot")
+        
+        text_bot = TextBot(settings.text_bot.token)
 
         # 基本校验
         if not getattr(settings.text_bot, 'token', ''):

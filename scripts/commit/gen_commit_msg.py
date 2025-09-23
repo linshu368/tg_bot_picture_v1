@@ -69,6 +69,7 @@ def main():
             diff_content = f.read()
     prompt = build_prompt(diff_content)
     
+    # prompt = build_prompt(diff_content)
     # # DEBUG: 打印 prompt 的前部分内容
     # print("=== 生成的 Prompt (前500字符) ===")
     # print(prompt[:500] + "..." if len(prompt) > 500 else prompt)

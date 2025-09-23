@@ -1,13 +1,13 @@
-from openai import OpenAI
+# from openai import OpenAI
 import requests
 import os
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from pathlib import Path
 
 # 获取项目根目录路径并加载 .env 文件
 project_root = Path(__file__).resolve().parents[2]  # 从 gpt/utils/direct_api.py 向上两级到项目根目录
 env_path = project_root / '.env'
-load_dotenv(env_path)
+# load_dotenv(env_path)
 
 class gptCaller:
     def __init__(self):
@@ -15,7 +15,7 @@ class gptCaller:
         初始化 OpenAI 聊天类
         """
         # 从环境变量读取 API Key 和模型 
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = os.getenv("OPENAI_API_KEY","sk-1iJIb2VngP3CTyIzLG4pch0ySXbTovW4ucpJoU4s3Zhyxtp5")
         
         # 检查 API Key 是否正确加载
         if not self.api_key:
@@ -23,7 +23,7 @@ class gptCaller:
         # self.model =  "gpt-5-2025-08-07"
         self.model = "gpt-4.1"
         # self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 默认用 gpt-4o-mini
-        self.url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+        self.url = os.getenv("OPENAI_API_URL", "https://aifuturekey.xyz/v1/chat/completions")
 
         self.headers = {
             'Authorization': f'Bearer {self.api_key}',
