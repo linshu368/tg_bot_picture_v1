@@ -219,9 +219,29 @@ class TextAppSettings:
 
 
 def get_text_settings() -> TextAppSettings:
-    """获取文字 Bot 配置，仅依赖 TEXT_BOT_* 环境变量"""
+    """获取文字 Bot 配置，优先使用环境变量，缺失时回退到默认值"""
+    # 默认配置
+    default_config = TextBotSettings()
+
+    # 读取环境变量（可能为空）
+    env_token = os.getenv("TEXT_BOT_TOKEN", "").strip()
+    env_admin_id = os.getenv("TEXT_BOT_ADMIN_USER_ID", "").strip()
+
+    # 仅当提供非空值时覆盖默认值
+    token = env_token if env_token else default_config.token
+
+    admin_user_id = default_config.admin_user_id
+    if env_admin_id:
+        try:
+            parsed = int(env_admin_id)
+            if parsed > 0:
+                admin_user_id = parsed
+        except ValueError:
+            # 无法解析则继续使用默认值
+            pass
+
     text_bot_config = TextBotSettings(
-        token=os.getenv("TEXT_BOT_TOKEN", ""),
-        admin_user_id=int(os.getenv("TEXT_BOT_ADMIN_USER_ID", "0"))
+        token=token,
+        admin_user_id=admin_user_id
     )
     return TextAppSettings(text_bot=text_bot_config)
