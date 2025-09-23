@@ -10,7 +10,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
+from src.interfaces.telegram.controllers.session_controller import process_message
 
 class TextBot:
     """最小文字Bot：仅支持 /start 与文本回声
@@ -103,6 +103,21 @@ class TextBot:
     async def _on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.message is None or not update.message.text:
             return
+        
+        user_id = str(update.effective_user.id) if update.effective_user else "unknown"
+        content = update.message.text
+        self.logger.info("📥 消息 user_id=%s text=%s", user_id, content)
+
+        # 调用内部函数，获取统一格式响应
+        resp = process_message(user_id=user_id, content=content)
+
+        if resp["code"] == 0:
+            reply_text = resp["data"]["reply"]
+        else:
+            reply_text = f"❌ 出错: {resp['message']} (code={resp['code']})"
+
+        await update.message.reply_text(reply_text)
+
         self.logger.info("📥 消息 user_id=%s text=%s", update.effective_user.id, update.message.text)
         await update.message.reply_text(update.message.text)
 

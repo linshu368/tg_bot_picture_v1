@@ -17,6 +17,7 @@ class SessionMessageInput(BaseModel):
     timestamp: int = Field(default_factory=lambda: int(time.time()), description="Unix时间戳，秒级")
 
     @field_validator("content")
+    @classmethod
     def validate_content_length(cls, v: str) -> str:
         if len(v) > 10000:
             # 符合接口契约的错误码
@@ -60,3 +61,17 @@ async def create_session(input_dto: SessionMessageInput):
         "actions": ["regenerate", "stop", "new_session"],
     }
     return envelope_ok(data)
+
+def process_message(user_id: str, content: str) -> Dict[str, Any]:
+    """供 Bot 内部直接调用的简化版接口（绕过 HTTP 层）"""
+    # 简单校验
+    if len(content) > 10000:
+        return {"code": 4002, "message": "消息过长，最大长度 10000", "data": None}
+
+    data = {
+        "session_id": "mock-session-001",
+        "message_id": str(uuid.uuid4()),
+        "reply": f"Mock 回复：你说的是「{content}」",
+        "actions": ["regenerate", "stop", "new_session"],
+    }
+    return {"code": 0, "message": "OK", "data": data}

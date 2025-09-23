@@ -223,7 +223,7 @@ def get_text_settings() -> TextAppSettings:
     # 默认配置
     default_config = TextBotSettings()
 
-    # 读取环境变量（可能为空）
+    # 读取环境变量（当前暂未设置）
     env_token = os.getenv("TEXT_BOT_TOKEN", "").strip()
     env_admin_id = os.getenv("TEXT_BOT_ADMIN_USER_ID", "").strip()
 
