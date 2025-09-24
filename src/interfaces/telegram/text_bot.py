@@ -8,9 +8,16 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
 )
 from src.interfaces.telegram.controllers.session_controller import process_message
+from src.interfaces.telegram.handlers.callback.text_bot_callback_handler import TextBotCallbackHandler
+from src.interfaces.telegram.ui_handler import UIHandler
+
+class DummyService:
+    def __getattr__(self, item):
+        return lambda *args, **kwargs: None
 
 class TextBot:
     """最小文字Bot：仅支持 /start 与文本回声
@@ -24,7 +31,16 @@ class TextBot:
         self.bot_token = bot_token
         self.logger = logging.getLogger(__name__)
         self._application: Optional[Application] = None
-
+        self.ui_handler = UIHandler()
+        # ✅ 最小占位依赖，避免 BaseCallbackHandler 报错
+        self.state_manager = DummyService()
+        self.state_helper = DummyService()
+        self.user_service = DummyService()
+        self.image_service = DummyService()
+        self.payment_service = DummyService()
+        # --------------------------------------------------
+        self.callback_handler = TextBotCallbackHandler(self)
+        
     # ------------------------
     # Public APIs
     # ------------------------
@@ -69,6 +85,8 @@ class TextBot:
         app.add_handler(CommandHandler("start", self._on_start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
 
+        app.add_handler(CallbackQueryHandler(self._on_callback_dispatch))  
+              
         self._application = app
         return app
 
@@ -100,6 +118,10 @@ class TextBot:
 3. 输入"/"查看所有互动指令”"""
         )
 
+
+    # -------------------------
+    # 消息处理
+    # -------------------------
     async def _on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.message is None or not update.message.text:
             return
@@ -115,10 +137,25 @@ class TextBot:
             reply_text = resp["data"]["reply"]
         else:
             reply_text = f"❌ 出错: {resp['message']} (code={resp['code']})"
+        reply_markup = self.ui_handler.build_reply_keyboard()
 
-        await update.message.reply_text(reply_text)
+        await update.message.reply_text(reply_text, reply_markup=reply_markup)
 
         self.logger.info("📥 消息 user_id=%s text=%s", update.effective_user.id, update.message.text)
-        await update.message.reply_text(update.message.text)
+        
 
+
+     # -------------------------
+    # 回调分发
+    # -------------------------
+    async def _on_callback_dispatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        if query is None:
+            return
+        action = query.data
+        handlers = self.callback_handler.get_callback_handlers()
+        if action in handlers:
+            await handlers[action](query, context)
+        else:
+            await query.answer("未知操作")
 
