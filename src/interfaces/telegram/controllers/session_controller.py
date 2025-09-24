@@ -4,6 +4,9 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from src.domain.services.session_service_base import SessionService
+session_service = SessionService()
+
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
 
@@ -27,6 +30,13 @@ class SessionMessageInput(BaseModel):
             )
         return v
 
+class RegenerateInput(BaseModel):
+    user_id: str = Field(..., max_length=64, description="用户ID，必填 ≤64")
+    last_message_id: str = Field(..., description="上一次消息的ID(UUID)")
+
+
+class NewSessionInput(BaseModel):
+    user_id: str = Field(..., max_length=64, description="用户ID，必填 ≤64")
 
 # -------------------------
 # Response Envelope
@@ -49,19 +59,55 @@ async def create_session(input_dto: SessionMessageInput):
     - 输入：SessionMessageInput
     - 输出：Envelope (Mock 数据)
     """
-    # Mock 数据，固定返回
-    mock_session_id = "mock-session-001"
-    mock_message_id = str(uuid.uuid4())
-    mock_reply = "这是一个Mock回复"
+    # 使用 SessionService 获取或创建
+    session = await session_service.get_or_create_session(input_dto.user_id)
 
     data = {
-        "session_id": mock_session_id,
+        "session_id": session["session_id"],
+        "message_id": str(uuid.uuid4()),
+        "reply": f"Mock 回复：你说的是「{input_dto.content}」",
+        "actions": ["regenerate", "stop", "new_session"],
+    }
+    return envelope_ok(data)
+
+@router.post("/{session_id}/regenerate")
+async def regenerate_reply(session_id: str, input_dto: RegenerateInput):
+    """
+    重新生成回复
+    - 输入：RegenerateInput
+    - 输出：Envelope (Mock 数据)
+    """
+    mock_message_id = str(uuid.uuid4())
+    mock_reply = f"这是重新生成的回复 (基于 last_message_id={input_dto.last_message_id})"
+
+    data = {
         "message_id": mock_message_id,
         "reply": mock_reply,
         "actions": ["regenerate", "stop", "new_session"],
     }
     return envelope_ok(data)
 
+
+@router.post("/new")
+async def new_session(input_dto: NewSessionInput):
+    """
+    开启新对话
+    - 输入：NewSessionInput
+    - 输出：Envelope (Mock 数据)
+    """
+    session = await session_service.new_session(input_dto.user_id)
+
+    data = {
+        "session_id": session["session_id"],
+        "message_id": str(uuid.uuid4()),
+        "reply": "已开启新对话",
+        "actions": ["regenerate", "stop", "new_session"],
+    }
+    return envelope_ok(data)
+
+# -------------------------
+# Internal Process Function
+# -------------------------
 def process_message(user_id: str, content: str) -> Dict[str, Any]:
     """供 Bot 内部直接调用的简化版接口（绕过 HTTP 层）"""
     # 简单校验
