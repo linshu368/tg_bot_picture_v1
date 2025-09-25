@@ -1,15 +1,14 @@
-# import re
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 class UIHandler:
     """文字 Bot 的 UI 渲染器"""
 
     @staticmethod
-    def build_reply_keyboard() -> InlineKeyboardMarkup:
+    def build_reply_keyboard(session_id: str="", last_message_id: str="") -> InlineKeyboardMarkup:
         """生成消息下方的操作按钮"""
         keyboard = [
             [
-                InlineKeyboardButton("🔄 重新生成", callback_data="regenerate"),
+                InlineKeyboardButton("🔄 重新生成", callback_data=f"regenerate:{session_id}:{last_message_id}"),
                 InlineKeyboardButton("🆕 新的对话", callback_data="new_session"),
             ]
         ]

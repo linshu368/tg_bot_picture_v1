@@ -5,8 +5,15 @@ from telegram.ext import ContextTypes
 from .base_callback_handler import BaseCallbackHandler, robust_callback_handler
 from ...ui_handler import UIHandler
 from src.domain.services.session_service_base import SessionService
+from src.domain.services.message_service import MessageService
+from src.domain.services.ai_completion_port import AICompletionPort
+from demo.api import GPTCaller
+from demo.role import role_data
+
 # 初始化全局 SessionService（轻量版，内存存储）
 session_service = SessionService()
+message_service = MessageService()
+ai_port = AICompletionPort(GPTCaller())
 
 class TextBotCallbackHandler(BaseCallbackHandler):
     """文字 Bot 的回调处理器"""
@@ -17,19 +24,24 @@ class TextBotCallbackHandler(BaseCallbackHandler):
 
     def get_callback_handlers(self):
         """定义本 Bot 支持的回调动作"""
-        return {
+        handlers = {
             "regenerate": self._on_regenerate,
             "new_session": self._on_new_session,
         }
+        self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
+        return handlers
 
     # -------------------------
     # 工具方法
     # -------------------------
-    async def _update_message(self, query, reply_text: str):
+    async def _update_message(self, query, reply_text: str, session_id: str, last_message_id: str):
         """统一的消息更新方法（actions 暂时由 UIHandler 固定）"""        
         await query.edit_message_text(
             text=reply_text,
-            reply_markup=UIHandler.build_reply_keyboard(),
+            reply_markup=UIHandler.build_reply_keyboard(
+                session_id=session_id,
+                last_message_id=last_message_id
+            ),
         )
 
     # -------------------------
@@ -38,17 +50,44 @@ class TextBotCallbackHandler(BaseCallbackHandler):
     @robust_callback_handler
     async def _on_regenerate(self, query, context: ContextTypes.DEFAULT_TYPE):
         """点击 重新生成 按钮"""
+        self.logger.info(f"📥 收到回调 action=regenerate data={query.data} user_id={query.from_user.id}")
         user_id = str(query.from_user.id)
-        last_message_id = str(uuid.uuid4())  # TODO: 未来从 MessageService 获取
+        raw_data = query.data
 
-         # 暂时用 Mock 回复，未来接入 AICompletionPort
-        reply = f"这是重新生成的回复 (last_message_id={last_message_id})"
+        #解析action 和 last_message_id
+        parts = raw_data.split(":", 1)
+        last_message_id = parts[1] if len(parts) > 1 else None
 
-        await self._update_message(query, reply)
+        # 从 callback_data 中解析 session_id 和 last_message_id
+        parts = raw_data.split(":")
+        action = parts[0]
+        session_id = parts[1] if len(parts) > 1 else None
+        last_message_id = parts[2] if len(parts) > 2 else None
+        
+        self.logger.info(
+        f"📥 回调 regenerate: user_id={user_id}, session_id={session_id}, last_message_id={last_message_id}"
+        )
+
+        try:
+            result = await message_service.regenerate_reply(
+                session_id=session_id,
+                last_message_id=last_message_id,
+                ai_port=ai_port,
+                role_data=role_data,
+            )
+            reply = result["reply"]
+        except TimeoutError:
+            reply = "⏱️ 生成超时，请重试"
+        except Exception as e:
+            self.logger.error(f"❌regenerate 调用 AI 失败: {e}")
+            reply = "⚠️ AI生成失败，请重试"
+
+        await self._update_message(query, reply, session_id, last_message_id)
 
     @robust_callback_handler
     async def _on_new_session(self, query, context: ContextTypes.DEFAULT_TYPE):
         """点击 新的对话 按钮"""
+        self.logger.info(f"📥 收到回调 action=new_session data={query.data} user_id={query.from_user.id}")
         user_id = str(query.from_user.id)
 
         # 调用 Service 创建新会话

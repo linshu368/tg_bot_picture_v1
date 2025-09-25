@@ -131,7 +131,7 @@ class TextBot:
         self.logger.info("📥 消息 user_id=%s text=%s", user_id, content)
 
         # 调用内部函数，获取统一格式响应
-        resp = process_message(user_id=user_id, content=content)
+        resp = await process_message(user_id=user_id, content=content)
 
         if resp["code"] == 0:
             reply_text = resp["data"]["reply"]
@@ -152,10 +152,17 @@ class TextBot:
         query = update.callback_query
         if query is None:
             return
-        action = query.data
+        
+        raw_data = query.data
+        action = raw_data.split(":")[0] if ":" in raw_data else raw_data
+
         handlers = self.callback_handler.get_callback_handlers()
+
+        self.logger.info(f"📥 收到回调 raw_data={raw_data} 解析action={action}")
+
         if action in handlers:
             await handlers[action](query, context)
         else:
+            self.logger.warning(f"⚠️ 未知回调 action={action}, data={raw_data}, 可用 handlers={list(handlers.keys())}")
             await query.answer("未知操作")
 
