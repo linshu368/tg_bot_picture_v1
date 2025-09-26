@@ -134,15 +134,19 @@ class TextBot:
         resp = await process_message(user_id=user_id, content=content)
 
         if resp["code"] == 0:
-            reply_text = resp["data"]["reply"]
+            data = resp["data"]
+            reply_text = data["reply"]
+            reply_markup = self.ui_handler.build_reply_keyboard(
+                session_id=data.get("session_id", ""),
+                user_message_id=data.get("user_message_id", "")
+            )
         else:
             reply_text = f"❌ 出错: {resp['message']} (code={resp['code']})"
-        reply_markup = self.ui_handler.build_reply_keyboard()
+            reply_markup = None
 
         await update.message.reply_text(reply_text, reply_markup=reply_markup)
 
         self.logger.info("📥 消息 user_id=%s text=%s", update.effective_user.id, update.message.text)
-        
 
 
      # -------------------------

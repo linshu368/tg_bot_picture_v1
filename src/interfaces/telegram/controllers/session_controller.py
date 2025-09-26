@@ -37,8 +37,9 @@ class SessionMessageInput(BaseModel):
         return v
 
 class RegenerateInput(BaseModel):
-    user_id: str = Field(..., max_length=64, description="用户ID，必填 ≤64")
-    last_message_id: str = Field(..., description="上一次消息的ID(UUID)")
+    # user_id: str = Field(..., max_length=64, description="用户ID，必填 ≤64") 
+    # #目前message_service.regenerate_reply只用session_id + user_message_id，如果未来想验证用户身份，可以保留 user_id
+    user_message_id: str = Field(..., description="上一次消息的ID(UUID)")
 
 
 class NewSessionInput(BaseModel):
@@ -55,43 +56,43 @@ def envelope_error(code: int, message: str) -> Dict[str, Any]:
     return {"code": code, "message": message, "data": None}
 
 
-# -------------------------
-# Controller Routes
-# -------------------------
-@router.post("")
-async def create_session(input_dto: SessionMessageInput):
-    """
-    创建新会话并发送消息
-    - 输入：SessionMessageInput
-    - 输出：Envelope (Mock 数据)
-    """
-    # 1.使用 SessionService 获取或创建
-    session = await session_service.get_or_create_session(input_dto.user_id)
-    session_id = session["session_id"]
+# # -------------------------
+# # Controller Routes
+# # -------------------------
+# @router.post("")
+# async def create_session(input_dto: SessionMessageInput):
+#     """
+#     创建新会话并发送消息
+#     - 输入：SessionMessageInput
+#     - 输出：Envelope (Mock 数据)
+#     """
+#     # 1.使用 SessionService 获取或创建
+#     session = await session_service.get_or_create_session(input_dto.user_id)
+#     session_id = session["session_id"]
 
-    # 2. 保存用户消息
-    user_message_id = message_service.save_message(session_id, "user", input_dto.content)
+#     # 2. 保存用户消息
+#     user_message_id = message_service.save_message(session_id, "user", input_dto.content)
 
-    # 3. 获取历史对话
-    history = message_service.get_history(session_id)
+#     # 3. 获取历史对话
+#     history = message_service.get_history(session_id)
 
-    # 4. 调用 AICompletionPort 生成回复
-    try:
-        reply = await ai_port.generate_reply(role_data, history, input_dto.content)
-    except TimeoutError:
-        return envelope_error(4004, "生成超时，请重试")
+#     # 4. 调用 AICompletionPort 生成回复
+#     try:
+#         reply = await ai_port.generate_reply(role_data, history, input_dto.content)
+#     except TimeoutError:
+#         return envelope_error(4004, "生成超时，请重试")
 
-    # 5. 保存 bot 回复
-    bot_message_id = message_service.save_message(session_id, "assistant", reply)
+#     # 5. 保存 bot 回复
+#     bot_message_id = message_service.save_message(session_id, "assistant", reply)
 
-    # 6. 返回统一响应
-    data = {
-        "session_id": session_id,
-        "message_id": bot_message_id,
-        "reply": reply,
-        "actions": ["regenerate", "stop", "new_session"],
-    }
-    return envelope_ok(data)
+#     # 6. 返回统一响应
+#     data = {
+#         "session_id": session_id,
+#         "message_id": bot_message_id,
+#         "reply": reply,
+#         "actions": ["regenerate", "stop", "new_session"],
+#     }
+#     return envelope_ok(data)
 
 
 @router.post("/{session_id}/regenerate")
@@ -104,7 +105,7 @@ async def regenerate_reply(session_id: str, input_dto: RegenerateInput):
     try:
         result = await message_service.regenerate_reply(
             session_id=session_id,
-            last_message_id=input_dto.last_message_id,
+            user_message_id=input_dto.user_message_id,
             ai_port=ai_port,
             role_data=role_data
         )
@@ -130,7 +131,7 @@ async def new_session(input_dto: NewSessionInput):
 
     data = {
         "session_id": session["session_id"],
-        "message_id": str(uuid.uuid4()),
+        # "message_id": str(uuid.uuid4()),  #新会话，用户输入为空
         "reply": "已开启新对话",
         "actions": ["regenerate", "stop", "new_session"],
     }
@@ -160,7 +161,8 @@ async def process_message(user_id: str, content: str) -> Dict[str, Any]:
 
     return envelope_ok({
         "session_id": session_id,
-        "message_id": bot_message_id,
+        "user_message_id": user_message_id,   
+        "bot_message_id": bot_message_id,
         "reply": reply,
         "actions": ["regenerate", "stop", "new_session"],
     })

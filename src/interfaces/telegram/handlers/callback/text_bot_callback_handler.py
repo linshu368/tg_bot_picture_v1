@@ -34,14 +34,10 @@ class TextBotCallbackHandler(BaseCallbackHandler):
     # -------------------------
     # 工具方法
     # -------------------------
-    async def _update_message(self, query, reply_text: str, session_id: str, last_message_id: str):
-        """统一的消息更新方法（actions 暂时由 UIHandler 固定）"""        
+    async def _update_message(self, query, reply_text: str, session_id: str = "", user_message_id: str = ""):
         await query.edit_message_text(
             text=reply_text,
-            reply_markup=UIHandler.build_reply_keyboard(
-                session_id=session_id,
-                last_message_id=last_message_id
-            ),
+            reply_markup=UIHandler.build_reply_keyboard(session_id, user_message_id),
         )
 
     # -------------------------
@@ -54,24 +50,20 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         user_id = str(query.from_user.id)
         raw_data = query.data
 
-        #解析action 和 last_message_id
-        parts = raw_data.split(":", 1)
-        last_message_id = parts[1] if len(parts) > 1 else None
-
-        # 从 callback_data 中解析 session_id 和 last_message_id
+        # 从 callback_data 中解析
         parts = raw_data.split(":")
         action = parts[0]
         session_id = parts[1] if len(parts) > 1 else None
-        last_message_id = parts[2] if len(parts) > 2 else None
-        
+        user_message_id = parts[2] if len(parts) > 2 else None
+
         self.logger.info(
-        f"📥 回调 regenerate: user_id={user_id}, session_id={session_id}, last_message_id={last_message_id}"
+            f"📥 回调 regenerate: user_id={user_id}, session_id={session_id}, user_message_id={user_message_id}"
         )
 
         try:
             result = await message_service.regenerate_reply(
                 session_id=session_id,
-                last_message_id=last_message_id,
+                last_message_id=user_message_id,   # ✅ 用 user_message_id 精确定位
                 ai_port=ai_port,
                 role_data=role_data,
             )
@@ -79,10 +71,11 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         except TimeoutError:
             reply = "⏱️ 生成超时，请重试"
         except Exception as e:
-            self.logger.error(f"❌regenerate 调用 AI 失败: {e}")
+            self.logger.error(f"❌ regenerate 调用 AI 失败: {e}")
             reply = "⚠️ AI生成失败，请重试"
 
-        await self._update_message(query, reply, session_id, last_message_id)
+        # ✅ 更新消息时，把 session_id 和 user_message_id 带下去
+        await self._update_message(query, reply, session_id=session_id, user_message_id=user_message_id)
 
     @robust_callback_handler
     async def _on_new_session(self, query, context: ContextTypes.DEFAULT_TYPE):
@@ -95,4 +88,4 @@ class TextBotCallbackHandler(BaseCallbackHandler):
 
         reply = f"已开启新对话 (session_id={session['session_id']})"
 
-        await self._update_message(query, reply)
+        await self._update_message(query, reply, session_id=session["session_id"])
