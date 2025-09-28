@@ -5,12 +5,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from src.domain.services.session_service_base import SessionService
-from src.domain.services.message_service import MessageService
+from src.domain.services.message_service import message_service_singleton as message_service
 from src.domain.services.ai_completion_port import AICompletionPort
 from demo.api import GPTCaller
 from demo.role import role_data
 session_service = SessionService()
-message_service = MessageService()
+
 ai_port = AICompletionPort(GPTCaller())
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])

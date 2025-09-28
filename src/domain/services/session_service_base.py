@@ -20,7 +20,7 @@ class SessionService:
 
     def generate_session_id(self) -> str:
         """生成唯一的会话ID"""
-        return f"sess_{uuid.uuid4().hex[:16]}"
+        return f"sess_{uuid.uuid4().hex[:8]}"
 
     async def create_session(self, user_id: str) -> Dict[str, Any]:
         """创建新会话"""
