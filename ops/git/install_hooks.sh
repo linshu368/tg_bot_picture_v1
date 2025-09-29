@@ -16,7 +16,7 @@ set -euo pipefail
 
 COMMIT_MSG_FILE="$1"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-bash "$REPO_ROOT/scripts/commit/commit_msg.sh" "$COMMIT_MSG_FILE"
+bash "$REPO_ROOT/ops/git/commit/commit_msg.sh" "$COMMIT_MSG_FILE"
 EOF
 
 chmod +x "$HOOK_DIR/commit-msg"
@@ -34,7 +34,7 @@ REMOTE="$1"
 URL="$2"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-bash "$REPO_ROOT/scripts/push/pre-push-hook.sh" "$@"
+bash "$REPO_ROOT/ops/git/push/pre-push-hook.sh" "$@"
 EOF
 
 chmod +x "$HOOK_DIR/pre-push"
@@ -49,7 +49,7 @@ cat > "$HOOK_DIR/post-commit" <<'EOF'
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-bash "$REPO_ROOT/scripts/commit/post-commit.sh"
+bash "$REPO_ROOT/ops/git/commit/post-commit.sh"
 EOF
 
 chmod +x "$HOOK_DIR/post-commit"

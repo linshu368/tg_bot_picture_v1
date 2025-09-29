@@ -18,7 +18,7 @@ if [ ! -x "$PY_BIN" ]; then
 fi
 
 # 调用 Python 脚本，生成 JSON
-OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
+OUT_JSON="$("$PY_BIN" "$REPO_ROOT/ops/git/commit/gen_commit_msg.py" \
   --diff "$DIFF_FILE")"
 
 # 取出 message

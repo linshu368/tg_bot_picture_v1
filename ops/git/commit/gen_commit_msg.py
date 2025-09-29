@@ -19,7 +19,7 @@ def build_prompt(diff_content: str) -> str:
         project_arch = f.read()
     with open(root_path / "gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
         project_principle = f.read()
-    with open(root_path / "gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
+    with open(root_path / "gpt/prompt/solid_save/mid/workstream/git_version_control.txt", "r", encoding="utf-8") as f:
         workstream_current_mission = f.read()
 
     prompt = commit_process_diff_prompt_template.format(

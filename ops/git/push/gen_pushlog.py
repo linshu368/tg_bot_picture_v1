@@ -122,14 +122,14 @@ try:
     dir_date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").strftime("%Y%m%d")
 except Exception:
     dir_date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d")
-push_dir = str(root_path / f"logs/pushlogs/{dir_name}_{dir_date}")
+push_dir = str(root_path / f"ops/git/logs/pushlogs/{dir_name}_{dir_date}")
 os.makedirs(f"{push_dir}/commits", exist_ok=True)
 
 with open(f"{push_dir}/push_log.json", "w") as f:
     json.dump(pushlog, f, indent=2, ensure_ascii=False)
 
 # 迁移当前 snapshots 目录下的所有 JSON 快照到本次 push 目录
-snap_dir = root_path / "logs" / "snapshots"
+snap_dir = root_path / "ops/git/logs" / "snapshots"
 if os.path.isdir(snap_dir):
     for name in os.listdir(snap_dir):
         if not name.endswith(".json"):

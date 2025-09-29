@@ -11,12 +11,12 @@ DIFF_FILE="$(mktemp -t diff.XXXXXX.patch)"
 git show "$COMMIT_ID" --pretty=format: > "$DIFF_FILE"
 
 # 调用 Python 生成 JSON（不保存文件）
-OUT_JSON="$("$PY_BIN" "$REPO_ROOT/scripts/commit/gen_commit_msg.py" \
+OUT_JSON="$("$PY_BIN" "$REPO_ROOT/ops/git/commit/gen_commit_msg.py" \
   --diff "$DIFF_FILE" \
   --commit-id "$COMMIT_ID")"
 
 # 保存快照（文件名 = 时间戳.json）
-SNAPSHOT_DIR="$REPO_ROOT/logs/snapshots"
+SNAPSHOT_DIR="$REPO_ROOT/ops/git/logs/snapshots"
 mkdir -p "$SNAPSHOT_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 echo "$OUT_JSON" > "$SNAPSHOT_DIR/$TIMESTAMP.json"

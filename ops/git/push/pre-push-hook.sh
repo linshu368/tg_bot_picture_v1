@@ -15,7 +15,7 @@ do
 
     COMMITS=$(git log $RANGE --pretty=format:"%H")
 
-    "$REPO_ROOT/venv/bin/python" scripts/push/gen_pushlog.py \
+    "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/ops/git/push/gen_pushlog.py" \
         --remote "$REMOTE" \
         --branch "$(git rev-parse --abbrev-ref HEAD)" \
         --commits "$COMMITS"
