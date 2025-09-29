@@ -4,14 +4,13 @@ import uuid
 from telegram.ext import ContextTypes
 from .base_callback_handler import BaseCallbackHandler, robust_callback_handler
 from ...ui_handler import UIHandler
-from src.domain.services.session_service_base import SessionService
 from src.domain.services.message_service import message_service_singleton as message_service
 from src.domain.services.ai_completion_port import AICompletionPort
 from demo.api import GPTCaller
 from demo.role import role_data
 
-# 初始化全局 SessionService（轻量版，内存存储）
-session_service = SessionService()
+# 导入全局单例 session_service，确保与 session_controller 使用同一实例
+from src.interfaces.telegram.controllers.session_controller import session_service
 
 ai_port = AICompletionPort(GPTCaller())
 
