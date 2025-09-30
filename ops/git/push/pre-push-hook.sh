@@ -1,9 +1,15 @@
 #!/bin/bash
 set -e
 
+# 加载配置
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+source "$SCRIPT_DIR/../config.sh"
+
 REMOTE="$1"
 URL="$2"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# 设置Python环境
+[ -x "$PYTHON_BIN" ] || PYTHON_BIN="$PYTHON_FALLBACK"
 
 while read local_ref local_sha remote_ref remote_sha
 do
@@ -15,7 +21,7 @@ do
 
     COMMITS=$(git log $RANGE --pretty=format:"%H")
 
-    "$REPO_ROOT/venv/bin/python" "$REPO_ROOT/ops/git/push/gen_pushlog.py" \
+    "$PYTHON_BIN" "$PROJECT_ROOT/ops/git/push/gen_pushlog.py" \
         --remote "$REMOTE" \
         --branch "$(git rev-parse --abbrev-ref HEAD)" \
         --commits "$COMMITS"

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 加载配置
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+source "$SCRIPT_DIR/../config.sh"
+
 COMMIT_MSG_FILE="${1:?usage: commit-msg .git/COMMIT_EDITMSG}"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 DIFF_FILE="$(mktemp -t diff.XXXXXX.patch)"
 git diff --cached > "$DIFF_FILE"
@@ -12,13 +15,11 @@ if [[ ! -s "$DIFF_FILE" ]]; then
   exit 0
 fi
 
-PY_BIN="$REPO_ROOT/venv/bin/python"
-if [ ! -x "$PY_BIN" ]; then
-  PY_BIN="python3"
-fi
+# 设置Python环境
+[ -x "$PYTHON_BIN" ] || PYTHON_BIN="$PYTHON_FALLBACK"
 
 # 调用 Python 脚本，生成 JSON
-OUT_JSON="$("$PY_BIN" "$REPO_ROOT/ops/git/commit/gen_commit_msg.py" \
+OUT_JSON="$("$PYTHON_BIN" "$PROJECT_ROOT/ops/git/commit/gen_commit_msg.py" \
   --diff "$DIFF_FILE")"
 
 # 取出 message

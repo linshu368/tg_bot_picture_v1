@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-PY_BIN="$REPO_ROOT/venv/bin/python"
-[ -x "$PY_BIN" ] || PY_BIN="python3"
+# 加载配置
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+source "$SCRIPT_DIR/../config.sh"
+
+# 设置Python环境
+[ -x "$PYTHON_BIN" ] || PYTHON_BIN="$PYTHON_FALLBACK"
 
 COMMIT_ID="$(git rev-parse HEAD)"
 
@@ -11,14 +14,13 @@ DIFF_FILE="$(mktemp -t diff.XXXXXX.patch)"
 git show "$COMMIT_ID" --pretty=format: > "$DIFF_FILE"
 
 # 调用 Python 生成 JSON（不保存文件）
-OUT_JSON="$("$PY_BIN" "$REPO_ROOT/ops/git/commit/gen_commit_msg.py" \
+OUT_JSON="$("$PYTHON_BIN" "$PROJECT_ROOT/ops/git/commit/gen_commit_msg.py" \
   --diff "$DIFF_FILE" \
   --commit-id "$COMMIT_ID")"
 
 # 保存快照（文件名 = 时间戳.json）
-SNAPSHOT_DIR="$REPO_ROOT/ops/git/logs/snapshots"
-mkdir -p "$SNAPSHOT_DIR"
+mkdir -p "$SNAPSHOTS_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-echo "$OUT_JSON" > "$SNAPSHOT_DIR/$TIMESTAMP.json"
+echo "$OUT_JSON" > "$SNAPSHOTS_DIR/$TIMESTAMP.json"
 
-echo "Commit log saved: $SNAPSHOT_DIR/$TIMESTAMP.json"
+echo "Commit log saved: $SNAPSHOTS_DIR/$TIMESTAMP.json"

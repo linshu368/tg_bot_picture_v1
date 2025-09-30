@@ -2,10 +2,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(git rev-parse --show-toplevel)"
-HOOK_DIR="$ROOT_DIR/.git/hooks"
+# 加载配置
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+source "$SCRIPT_DIR/config.sh"
+
+HOOK_DIR="$PROJECT_ROOT/.git/hooks"
 
 mkdir -p "$HOOK_DIR"
+
+echo "🔧 Git运维工具安装中..."
+echo "项目根路径: $PROJECT_ROOT"
+echo "Python环境: $PYTHON_BIN"
+echo "GPT模块路径: $GPT_MODULE_ROOT"
+echo "Prompt目录: $PROMPT_DIR"
+echo ""
 
 #############################################
 # commit-msg hook
@@ -15,8 +25,8 @@ cat > "$HOOK_DIR/commit-msg" <<'EOF'
 set -euo pipefail
 
 COMMIT_MSG_FILE="$1"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-bash "$REPO_ROOT/ops/git/commit/commit_msg.sh" "$COMMIT_MSG_FILE"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+bash "$PROJECT_ROOT/ops/git/commit/commit_msg.sh" "$COMMIT_MSG_FILE"
 EOF
 
 chmod +x "$HOOK_DIR/commit-msg"
@@ -33,8 +43,8 @@ set -euo pipefail
 REMOTE="$1"
 URL="$2"
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-bash "$REPO_ROOT/ops/git/push/pre-push-hook.sh" "$@"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+bash "$PROJECT_ROOT/ops/git/push/pre-push-hook.sh" "$@"
 EOF
 
 chmod +x "$HOOK_DIR/pre-push"
@@ -48,9 +58,23 @@ cat > "$HOOK_DIR/post-commit" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-bash "$REPO_ROOT/ops/git/commit/post-commit.sh"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+bash "$PROJECT_ROOT/ops/git/commit/post-commit.sh"
 EOF
 
 chmod +x "$HOOK_DIR/post-commit"
 echo "✅ post-commit hook 已安装"
+
+echo ""
+echo "🎉 Git运维工具安装完成！"
+echo ""
+echo "📝 新项目迁移说明："
+echo "1. 复制整个 ops/git/ 目录到新项目"
+echo "2. 修改 ops/git/config.sh 中的路径配置"
+echo "3. 运行 bash ops/git/install_hooks.sh"
+echo ""
+echo "⚙️  当前配置："
+echo "- Python: $PYTHON_BIN"
+echo "- GPT模块: $GPT_MODULE_ROOT"
+echo "- Prompt目录: $PROMPT_DIR"
+echo "- 日志目录: $LOGS_DIR"

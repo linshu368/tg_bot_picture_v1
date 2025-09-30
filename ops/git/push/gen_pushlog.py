@@ -2,21 +2,24 @@ import argparse, json, os, datetime, sys
 from pathlib import Path
 import subprocess
 # 引入 gptCaller 与参数模板
-root_path = Path(__file__).resolve().parents[2]
-sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
-from gpt.utils.direct_api import gptCaller
-from gpt.param import commit_process_diff_prompt_template 
-from gpt.param import push_log_title_prompt_template
-from gpt.param import push_log_arch2pr_prompt_template
+# 从环境变量获取配置，如果没有则使用默认值
+root_path = Path(os.environ.get('GPT_MODULE_ROOT', Path(__file__).resolve().parents[2]))
+prompt_dir = Path(os.environ.get('PROMPT_DIR', root_path / "ops/gpt/prompt"))
+logs_dir = Path(os.environ.get('LOGS_DIR', root_path / "ops/git/logs"))
+sys.path.append(str(root_path))  # 便于以包形式导入 ops.gpt.*
+from ops.gpt.utils.direct_api import gptCaller
+from ops.gpt.param import commit_process_diff_prompt_template 
+from ops.gpt.param import push_log_title_prompt_template
+from ops.gpt.param import push_log_arch2pr_prompt_template
 
 
 def build_prompt(diff_content: str) -> str:
     """基于模板 push_msg.prompt 渲染 prompt"""
-    with open(root_path / "gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/long/arch.txt", "r", encoding="utf-8") as f:
         project_arch = f.read()
-    with open(root_path / "gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/long/principle.txt", "r", encoding="utf-8") as f:
         project_principle = f.read()
-    with open(root_path / "gpt/prompt/solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/mid/workstream/mission_textbot_p1.txt", "r", encoding="utf-8") as f:
         workstream_current_mission = f.read()
 
     prompt = commit_process_diff_prompt_template.format(
@@ -30,13 +33,13 @@ def build_prompt(diff_content: str) -> str:
 
 def build_prompt_arch2pr(diff_content: str) -> str:
     """基于模板 push_log_pr2arch.prompt 渲染 prompt"""
-    with open(root_path / "gpt/prompt/solid_save/long/project_business_goal.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/long/project_business_goal.txt", "r", encoding="utf-8") as f:
         product_business_goal = f.read()
-    with open(root_path / "gpt/prompt/solid_save/mid/requirements_functional_spec.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/mid/requirements_functional_spec.txt", "r", encoding="utf-8") as f:
         requirements_functional_spec = f.read()
-    with open(root_path / "gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/long/arch.txt", "r", encoding="utf-8") as f:
         project_architecture = f.read()
-    with open(root_path / "gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/long/principle.txt", "r", encoding="utf-8") as f:
         project_principle = f.read()
 
     prompt = push_log_arch2pr_prompt_template.format(
@@ -122,14 +125,14 @@ try:
     dir_date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").strftime("%Y%m%d")
 except Exception:
     dir_date = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d")
-push_dir = str(root_path / f"ops/git/logs/pushlogs/{dir_name}_{dir_date}")
+push_dir = str(logs_dir / f"pushlogs/{dir_name}_{dir_date}")
 os.makedirs(f"{push_dir}/commits", exist_ok=True)
 
 with open(f"{push_dir}/push_log.json", "w") as f:
     json.dump(pushlog, f, indent=2, ensure_ascii=False)
 
 # 迁移当前 snapshots 目录下的所有 JSON 快照到本次 push 目录
-snap_dir = root_path / "ops/git/logs" / "snapshots"
+snap_dir = logs_dir / "snapshots"
 if os.path.isdir(snap_dir):
     for name in os.listdir(snap_dir):
         if not name.endswith(".json"):

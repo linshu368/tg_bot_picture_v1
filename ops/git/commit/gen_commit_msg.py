@@ -3,23 +3,26 @@ import argparse
 import json
 import sys
 import subprocess
+import os
 from pathlib import Path
 from datetime import datetime
 
 # 引入 gptCaller 与参数模板
-root_path = Path(__file__).resolve().parents[2]
-sys.path.append(str(root_path))  # 便于以包形式导入 gpt.*
-from gpt.utils.direct_api import gptCaller
-from gpt.param import commit_process_diff_prompt_template
+# 从环境变量获取配置，如果没有则使用默认值
+root_path = Path(os.environ.get('GPT_MODULE_ROOT', Path(__file__).resolve().parents[2]))
+prompt_dir = Path(os.environ.get('PROMPT_DIR', root_path / "ops/gpt/prompt"))
+sys.path.append(str(root_path))  # 便于以包形式导入 ops.gpt.*
+from ops.gpt.utils.direct_api import gptCaller
+from ops.gpt.param import commit_process_diff_prompt_template
 
 
 def build_prompt(diff_content: str) -> str:
     """基于模板 commit_process_diff.prompt 渲染 prompt"""
-    with open(root_path / "gpt/prompt/solid_save/long/arch.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/long/arch.txt", "r", encoding="utf-8") as f:
         project_arch = f.read()
-    with open(root_path / "gpt/prompt/solid_save/long/principle.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/long/principle.txt", "r", encoding="utf-8") as f:
         project_principle = f.read()
-    with open(root_path / "gpt/prompt/solid_save/mid/workstream/git_version_control.txt", "r", encoding="utf-8") as f:
+    with open(prompt_dir / "solid_save/mid/workstream/git_version_control.txt", "r", encoding="utf-8") as f:
         workstream_current_mission = f.read()
 
     prompt = commit_process_diff_prompt_template.format(
