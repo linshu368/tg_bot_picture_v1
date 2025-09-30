@@ -1,5 +1,5 @@
 import os
-from gpt.utils.files_utils import read_prompt_template
+from .utils.files_utils import read_prompt_template
 
 file_dir_path = os.path.dirname(os.path.abspath(__file__))
 
