@@ -7,7 +7,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
 from .base_callback_handler import BaseCallbackHandler, robust_callback_handler
-from ...ui_handler import escape_markdown
+# from ...ui_handler import escape_markdown
 
 
 class ProfileCallbackHandler(BaseCallbackHandler):
