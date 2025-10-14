@@ -3,7 +3,7 @@ fastapi==0.117.1
 uvicorn==0.36.0
 
 # ---- 异步与网络 ----
-aiofiles==23.2.0
+# aiofiles==23.2.0  # 异步文件操作 - 主要用于图片文件处理
 aiohttp==3.9.1
 asyncpg==0.29.0
 httpx==0.25.2   # 与 supabase / openai / postgrest 均兼容
@@ -23,7 +23,7 @@ supabase==2.3.4
 gotrue==2.9.1
 postgrest==0.15.1
 realtime==1.0.6
-storage3==0.7.7
+# storage3==0.7.7  # Supabase存储服务 - 主要用于存储处理后的图片
 supafunc==0.3.3
 
 # ---- OpenAI SDK ----
@@ -38,7 +38,7 @@ sentry-sdk==2.38.0
 
 # ---- FastAPI 支持库 ----
 starlette==0.48.0
-python-multipart==0.0.20
+# python-multipart==0.0.20  # 主要用于处理图片上传的multipart/form-data - 仅图片bot使用
 email-validator==2.3.0
 
 # ---- 异步优化 ----
@@ -46,7 +46,7 @@ uvloop==0.21.0
 watchfiles==1.1.0
 
 # ---- 图片与 JSON ----
-Pillow==10.1.0
+# Pillow==10.1.0  # 图片处理库 - 仅图片bot使用
 orjson==3.11.3
 ujson==5.11.0
 
