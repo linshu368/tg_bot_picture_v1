@@ -7,8 +7,6 @@ class AICompletionPort:
         self.gpt = gpt_caller
 
     async def generate_reply(self, role_data, history, user_input, timeout=30):
-        start = time.time()
-
         # 打印输入的历史记录
         print(f"🧠 AI生成回复 | 输入历史记录数量: {len(history)}")
         if history:
@@ -48,6 +46,9 @@ class AICompletionPort:
         if random.random() < 0.01:
             raise TimeoutError("4004: 生成超时")
 
+        # 开始计时：从调用GPT API开始
+        start = time.time()
+        
         # 调用 GPT（注意：GPTCaller 也要改成 async）
         response = await self.gpt.get_response(messages, model_name=role_data.get("model"))
         

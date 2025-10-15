@@ -4,7 +4,7 @@ uvicorn==0.36.0
 
 # ---- 异步与网络 ----
 # aiofiles==23.2.0  # 异步文件操作 - 主要用于图片文件处理
-aiohttp>=3.10.0,<3.12
+aiohttp>=3.10.0,<3.12  # 保持你的版本范围，更灵活
 asyncpg==0.29.0
 httpx==0.25.2   # 与 supabase / openai / postgrest 均兼容
 httpcore==1.0.9
