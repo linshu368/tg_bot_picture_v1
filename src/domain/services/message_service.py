@@ -102,7 +102,7 @@ class MessageService:
 
 
 # ✅ 全局唯一实例
-message_service_singleton = MessageService()
+message_service = MessageService()
 
     # # 未来可迁出为ConversationService
     # async def regenerate_reply(self, session_id: str, last_message_id: str, ai_port, role_data):

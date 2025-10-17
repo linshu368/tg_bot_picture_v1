@@ -14,6 +14,9 @@ from telegram.ext import (
 from src.interfaces.telegram.controllers.session_controller import process_message
 from src.interfaces.telegram.handlers.callback.text_bot_callback_handler import TextBotCallbackHandler
 from src.interfaces.telegram.ui_handler import UIHandler
+from src.domain.services.role_service import RoleService
+from src.domain.services.session_service_base import session_service
+
 
 class DummyService:
     def __getattr__(self, item):
@@ -32,6 +35,8 @@ class TextBot:
         self.logger = logging.getLogger(__name__)
         self._application: Optional[Application] = None
         self.ui_handler = UIHandler()
+        self.role_service = RoleService()
+        self.default_role_id = "001" #默认角色ID
         # ✅ 最小占位依赖，避免 BaseCallbackHandler 报错
         self.state_manager = DummyService()
         self.state_helper = DummyService()
@@ -96,10 +101,51 @@ class TextBot:
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_user is None or update.message is None:
             return
+
+        user_id = str(update.effective_user.id)
         user_first_name = update.effective_user.first_name or ""
-        self.logger.info("📥 /start user_id=%s name=%s", update.effective_user.id, user_first_name)
-        await update.message.reply_text(
-            """让AI为你提供理想陪伴：
+        self.logger.info("📥 /start user_id=%s name=%s", user_id, user_first_name)
+        
+        # 解析 Deep Link 参数
+        deep_link_param = context.args[0] if context.args else None
+        self.logger.info(f"📥 Deep Link参数: {deep_link_param}")
+        
+        # 情况B：Deep Link 角色切换
+        if deep_link_param and deep_link_param.startswith("role_"):
+            role_id = deep_link_param.replace("role_", "")
+            self.logger.info(f"🔄 Deep Link角色切换: role_id={role_id}")
+            
+            # 1. 校验角色存在
+            role = self.role_service.get_role_by_id(role_id)
+            
+            if role:
+                # 2. 创建新会话并绑定指定角色（强制替换旧会话）
+                session = await session_service.new_session(user_id, role_id)
+                self.logger.info(f"✅ 创建新会话: session_id={session['session_id']}, role_id={role_id}")
+                
+                # 3. 发送角色切换提示
+                await update.message.reply_text(f"✨ 已切换到角色：{role['name']}")
+                
+                # 4. 发送角色预置消息
+                await update.message.reply_text(role["predefined_messages"])
+            else:
+                # 角色不存在，降级到默认角色
+                self.logger.warning(f"⚠️ 角色不存在: role_id={role_id}，使用默认角色")
+                await update.message.reply_text(f"❌ 角色不存在，使用默认角色")
+                
+                # 使用默认角色创建会话
+                session = await session_service.new_session(user_id, self.default_role_id)
+                role = self.role_service.get_role_by_id(self.default_role_id)
+                if role:
+                    await update.message.reply_text(role["predefined_messages"])
+        
+        # 情况A：正常启动（无参数），使用默认角色
+        else:
+            self.logger.info(f"🆕 正常启动，使用默认角色: role_id={self.default_role_id}")
+            
+            # 1. 发送通用欢迎语
+            await update.message.reply_text(
+                """让AI为你提供理想陪伴：
 • 💕 甜蜜的恋爱互动
 • 💌 深夜的暧昧幻想
 • 📝 令人社保的文爱体验
@@ -115,9 +161,21 @@ class TextBot:
 🎮 开始体验:
 1. 直接发送消息即可与默认女友"塞拉芬娜"对话
 2. 使用/list 查看角色列表，或在角色卡频道选择更多角色（高级用户：可发送酒馆v2 PNG格式角色卡来导入你喜欢的角色）
-3. 输入"/"查看所有互动指令”"""
-        )
-
+3. 输入"/"查看所有互动指令"""
+            )
+            
+            # 2. 创建会话并绑定默认角色
+            session = await session_service.create_session_with_role(user_id, self.default_role_id)
+            self.logger.info(f"✅ 创建会话: session_id={session['session_id']}, role_id={self.default_role_id}")
+            
+            # 3. 获取默认角色数据
+            role = self.role_service.get_role_by_id(self.default_role_id)
+            
+            # 4. 发送默认角色预置消息
+            if role:
+                await update.message.reply_text(role["predefined_messages"])
+            else:
+                await update.message.reply_text("❌ 默认角色不存在")
 
     # -------------------------
     # 消息处理

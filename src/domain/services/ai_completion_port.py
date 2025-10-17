@@ -59,3 +59,8 @@ class AICompletionPort:
         print("🤖" + "="*48)
         
         return response
+
+
+# ✅ 全局唯一实例 - 与其他服务保持一致的设计模式
+from demo.api import GPTCaller
+ai_completion_port = AICompletionPort(GPTCaller())

@@ -22,17 +22,17 @@ class SessionService:
         """生成唯一的会话ID"""
         return f"sess_{uuid.uuid4().hex[:8]}"
 
-    async def create_session(self, user_id: str) -> Dict[str, Any]:
+    async def create_session(self, user_id: str, role_id: str = None) -> Dict[str, Any]:
         """创建新会话"""
         session_id = self.generate_session_id()
         session = {
             "session_id": session_id,
             "user_id": user_id,
-            "role_id": None,
+            "role_id": role_id,
             "history": [],
         }
         self._sessions[user_id] = session
-        self.logger.info(f"✅ 新建会话: user_id={user_id}, session_id={session_id}")
+        self.logger.info(f"✅ 新建会话: user_id={user_id}, session_id={session_id}, role_id={role_id}")
         return session
 
     async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -48,6 +48,30 @@ class SessionService:
             return await self.create_session(user_id)
         return self._sessions[user_id]
 
-    async def new_session(self, user_id: str) -> Dict[str, Any]:
+    async def new_session(self, user_id: str, role_id: str = None) -> Dict[str, Any]:
         """强制开启新会话（替换旧会话）"""
-        return await self.create_session(user_id)
+        return await self.create_session(user_id, role_id)
+
+    async def get_session_role_id(self, session_id: str) -> Optional[str]:
+        """根据 session_id 获取绑定的角色ID"""
+        session = await self.get_session(session_id)
+        return session.get("role_id") if session else None
+
+    async def set_session_role_id(self, session_id: str, role_id: str) -> bool:
+        """为指定会话设置角色ID"""
+        session = await self.get_session(session_id)
+        if session:
+            session["role_id"] = role_id
+            self.logger.info(f"✅ 更新会话角色: session_id={session_id}, role_id={role_id}")
+            return True
+        self.logger.warning(f"⚠️ 会话不存在，无法设置角色: session_id={session_id}")
+        return False
+
+    async def create_session_with_role(self, user_id: str, role_id: str) -> Dict[str, Any]:
+        """创建绑定特定角色的新会话"""
+        return await self.create_session(user_id, role_id)
+
+
+
+# ✅ 全局唯一实例 
+session_service = SessionService()

@@ -4,15 +4,10 @@ import uuid
 from telegram.ext import ContextTypes
 from .base_callback_handler import BaseCallbackHandler, robust_callback_handler
 from ...ui_handler import UIHandler
-from src.domain.services.message_service import message_service_singleton as message_service
-from src.domain.services.ai_completion_port import AICompletionPort
-from demo.api import GPTCaller
-from demo.role import role_data
-
-# 导入全局单例 session_service，确保与 session_controller 使用同一实例
-from src.interfaces.telegram.controllers.session_controller import session_service
-
-ai_port = AICompletionPort(GPTCaller())
+from src.domain.services.session_service_base import session_service
+from src.domain.services.message_service import message_service
+from src.domain.services.ai_completion_port import ai_completion_port
+from src.domain.services.role_service import role_service
 
 class TextBotCallbackHandler(BaseCallbackHandler):
     """文字 Bot 的回调处理器"""
@@ -26,6 +21,17 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         handlers = {
             "regenerate": self._on_regenerate,
             "new_session": self._on_new_session,
+            # 主菜单相关回调
+            "profile_view_records": self._on_profile_view_records,
+            "profile_view_uid": self._on_profile_view_uid,
+            "profile_view_orders": self._on_profile_view_orders,
+            "profile_buy_credits": self._on_buy_credits,
+            "buy_credits": self._on_buy_credits,
+            "daily_checkin": self._on_daily_checkin,
+            "select_package": self._on_select_package,
+            "pay_method": self._on_pay_method,
+            "cancel_buy": self._on_cancel_buy,
+            "back_to_main": self._on_back_to_main,
         }
         self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
         return handlers
@@ -60,31 +66,78 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         )
 
         try:
+            # 1. 从会话获取绑定的角色ID
+            role_id = await session_service.get_session_role_id(session_id)
+            self.logger.info(f"📥 获取会话角色: session_id={session_id}, role_id={role_id}")
+            
+            # 2. 获取角色数据，如果角色不存在则使用默认角色
+            if role_id:
+                role_data = role_service.get_role_by_id(role_id)
+            else:
+                role_data = None
+                
+            if not role_data:
+                # 降级到默认角色 (从bot实例获取默认角色ID)
+                default_role_id = getattr(self.bot, 'default_role_id', '001')
+                role_data = role_service.get_role_by_id(default_role_id)
+                self.logger.warning(f"⚠️ 角色不存在，使用默认角色: role_id={role_id} -> default={default_role_id}")
+            
+            if not role_data:
+                await self._update_message(query, "❌ 角色配置错误，请联系管理员", session_id=session_id, user_message_id=user_message_id)
+                return
+                
+            self.logger.info(f"✅ 使用角色: {role_data.get('name', 'Unknown')} (ID: {role_data.get('role_id', 'Unknown')})")
+            
+            # 3. 重新生成回复
             result = await message_service.regenerate_reply(
                 session_id=session_id,
                 last_message_id=user_message_id,   # ✅ 用 user_message_id 精确定位
-                ai_port=ai_port,
-                role_data=role_data,
+                ai_port=ai_completion_port,
+                role_data=role_data,  # ✅ 使用动态获取的角色数据
             )
             reply = result["reply"]
+            await self._update_message(query, reply, session_id=session_id, user_message_id=user_message_id)
         except TimeoutError:
-            reply = "⏱️ 生成超时，请重试"
+            await self._update_message(query, "⏱️ 生成超时，请重试", session_id=session_id, user_message_id=user_message_id)
         except Exception as e:
-            self.logger.error(f"❌ regenerate 调用 AI 失败: {e}")
-            reply = "⚠️ AI生成失败，请重试"
-
-        # ✅ 更新消息时，把 session_id 和 user_message_id 带下去
-        await self._update_message(query, reply, session_id=session_id, user_message_id=user_message_id)
+            self.logger.error(f"❌ 重新生成失败: {e}")
+            await self._update_message(query, "⚠️ AI生成失败，请重试", session_id=session_id, user_message_id=user_message_id)
 
     @robust_callback_handler
     async def _on_new_session(self, query, context: ContextTypes.DEFAULT_TYPE):
         """点击 新的对话 按钮"""
-        self.logger.info(f"📥 收到回调 action=new_session data={query.data} user_id={query.from_user.id}")
         user_id = str(query.from_user.id)
-
-        # 调用 Service 创建新会话
-        session = await session_service.new_session(user_id)
-
-        reply = f"已开启新对话 (session_id={session['session_id']})"
-
-        await self._update_message(query, reply, session_id=session["session_id"])
+        raw_data = query.data
+        
+        # 从 callback_data 中解析当前session_id
+        parts = raw_data.split(":")
+        current_session_id = parts[1] if len(parts) > 1 else None
+        
+        self.logger.info(f"📥 新对话请求: user_id={user_id}, current_session_id={current_session_id}")
+        
+        try:
+            # 1. 获取当前会话的角色ID，保持角色不变
+            current_role_id = await session_service.get_session_role_id(current_session_id)
+            if not current_role_id:
+                # 如果当前会话没有角色，使用默认角色
+                current_role_id = getattr(self.bot, 'default_role_id', '001')
+                self.logger.info(f"📥 当前会话无角色，使用默认角色: {current_role_id}")
+            
+            # 2. 创建新会话，保持相同角色
+            new_session = await session_service.new_session(user_id, current_role_id)
+            new_session_id = new_session["session_id"]
+            
+            self.logger.info(f"✅ 创建新对话: session_id={new_session_id}, role_id={current_role_id}")
+            
+            # 3. 获取角色信息，发送角色欢迎语
+            role_data = role_service.get_role_by_id(current_role_id)
+            if role_data:
+                welcome_msg = f"🆕 已开启新对话\n\n💫 当前角色：{role_data.get('name', '未知角色')}\n\n{role_data.get('predefined_messages', '你好！')}"
+            else:
+                welcome_msg = "🆕 已开启新对话"
+            
+            await self._update_message(query, welcome_msg, session_id=new_session_id, user_message_id="")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 创建新对话失败: {e}")
+            await self._update_message(query, "❌ 创建新对话失败，请重试", session_id="", user_message_id="")
