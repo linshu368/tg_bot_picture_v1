@@ -4,6 +4,7 @@
 """
 
 import os
+import logging
 from typing import Dict, Any
 from dataclasses import dataclass, field
 
@@ -207,8 +208,11 @@ def get_settings() -> AppSettings:
 @dataclass
 class TextBotSettings:
     """文字 Bot 配置（独立于主 Bot）"""
-    token: str = "8423660455:AAFd5I5Ax3-gYZEqc_ZL05owE2lCyI5E2EM"
+    token: str = ""
     admin_user_id: int = 7116726082
+    bot_username: str = ""
+    role_channel_url: str = "https://t.me/ai_role_list"
+    environment: str = "dev"  # dev | staging | prod
    
 
 
@@ -223,25 +227,49 @@ def get_text_settings() -> TextAppSettings:
     # 默认配置
     default_config = TextBotSettings()
 
-    # 读取环境变量（当前暂未设置）
-    env_token = os.getenv("TEXT_BOT_TOKEN", "").strip()
-    env_admin_id = os.getenv("TEXT_BOT_ADMIN_USER_ID", "").strip()
+    # 读取环境变量（系统变量优先，其次 .env，最后默认值）
+    env = os.getenv("ENV", default_config.environment).strip() or default_config.environment
+    env_token = os.getenv("TEXT_BOT_TOKEN", default_config.token).strip()
+    env_admin_id = os.getenv("TEXT_BOT_ADMIN_USER_ID", str(default_config.admin_user_id)).strip()
+    env_bot_username = os.getenv("BOT_USERNAME", default_config.bot_username).strip()
+    env_role_channel_url = os.getenv("ROLE_CHANNEL_URL", default_config.role_channel_url).strip()
 
-    # 仅当提供非空值时覆盖默认值
-    token = env_token if env_token else default_config.token
+    # 规范化与解析
+    token = env_token
+    try:
+        parsed_admin_id = int(env_admin_id) if env_admin_id else default_config.admin_user_id
+        admin_user_id = parsed_admin_id if parsed_admin_id > 0 else default_config.admin_user_id
+    except ValueError:
+        logging.warning("TEXT_BOT_ADMIN_USER_ID 无法解析为整数，使用默认值")
+        admin_user_id = default_config.admin_user_id
 
-    admin_user_id = default_config.admin_user_id
-    if env_admin_id:
-        try:
-            parsed = int(env_admin_id)
-            if parsed > 0:
-                admin_user_id = parsed
-        except ValueError:
-            # 无法解析则继续使用默认值
-            pass
+    bot_username = env_bot_username
+    role_channel_url = env_role_channel_url
+    if role_channel_url and not role_channel_url.startswith("https://t.me/"):
+        logging.warning(f"ROLE_CHANNEL_URL 非 t.me 链接：{role_channel_url}，使用默认值")
+        role_channel_url = default_config.role_channel_url
+
+    # 环境强校验（prod 更严格）
+    if env == "prod":
+        if not token:
+            raise ValueError("TEXT_BOT_TOKEN 未配置（prod 必填）")
+        if not bot_username:
+            raise ValueError("BOT_USERNAME 未配置（prod 建议必填）")
+        if not role_channel_url or not role_channel_url.startswith("https://t.me/"):
+            raise ValueError("ROLE_CHANNEL_URL 非法（prod 必填且需以 https://t.me/ 开头）")
+    else:
+        if not token:
+            logging.warning("TEXT_BOT_TOKEN 未配置（非 prod 环境将无法连接 Bot）")
+        if not bot_username:
+            logging.info("BOT_USERNAME 未配置（可选）")
+        if role_channel_url == default_config.role_channel_url:
+            logging.info(f"ROLE_CHANNEL_URL 使用默认值：{role_channel_url}")
 
     text_bot_config = TextBotSettings(
-        token=token,
-        admin_user_id=admin_user_id
+        token=token or default_config.token,
+        admin_user_id=admin_user_id,
+        bot_username=bot_username or default_config.bot_username,
+        role_channel_url=role_channel_url or default_config.role_channel_url,
+        environment=env
     )
     return TextAppSettings(text_bot=text_bot_config)
