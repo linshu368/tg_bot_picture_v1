@@ -21,17 +21,6 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         handlers = {
             "regenerate": self._on_regenerate,
             "new_session": self._on_new_session,
-            # 主菜单相关回调
-            "profile_view_records": self._on_profile_view_records,
-            "profile_view_uid": self._on_profile_view_uid,
-            "profile_view_orders": self._on_profile_view_orders,
-            "profile_buy_credits": self._on_buy_credits,
-            "buy_credits": self._on_buy_credits,
-            "daily_checkin": self._on_daily_checkin,
-            "select_package": self._on_select_package,
-            "pay_method": self._on_pay_method,
-            "cancel_buy": self._on_cancel_buy,
-            "back_to_main": self._on_back_to_main,
         }
         self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
         return handlers

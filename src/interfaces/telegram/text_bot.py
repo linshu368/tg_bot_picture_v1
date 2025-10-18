@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -36,7 +36,7 @@ class TextBot:
         self._application: Optional[Application] = None
         self.ui_handler = UIHandler()
         self.role_service = RoleService()
-        self.default_role_id = "001" #默认角色ID
+        self.default_role_id = "1" #默认角色ID
         # ✅ 最小占位依赖，避免 BaseCallbackHandler 报错
         self.state_manager = DummyService()
         self.state_helper = DummyService()
@@ -123,8 +123,12 @@ class TextBot:
                 session = await session_service.new_session(user_id, role_id)
                 self.logger.info(f"✅ 创建新会话: session_id={session['session_id']}, role_id={role_id}")
                 
-                # 3. 发送角色切换提示
-                await update.message.reply_text(f"✨ 已切换到角色：{role['name']}")
+                # 3. 发送角色切换提示（带底部主菜单）
+                main_menu = self.ui_handler.create_main_menu_keyboard()
+                await update.message.reply_text(
+                    f"✨ 已切换到角色：{role['name']}", 
+                    reply_markup=main_menu
+                )
                 
                 # 4. 发送角色预置消息
                 await update.message.reply_text(role["predefined_messages"])
@@ -143,7 +147,8 @@ class TextBot:
         else:
             self.logger.info(f"🆕 正常启动，使用默认角色: role_id={self.default_role_id}")
             
-            # 1. 发送通用欢迎语
+            # 1. 发送通用欢迎语（带底部主菜单）
+            main_menu = self.ui_handler.create_main_menu_keyboard()
             await update.message.reply_text(
                 """让AI为你提供理想陪伴：
 • 💕 甜蜜的恋爱互动
@@ -152,16 +157,15 @@ class TextBot:
 • 💫 或任何你想要的剧情...
 
 ✨ 独特体验：
-• 海量精品角色等你来选（/list 查看角色世界）
-• 支持上传自定义角色，打造你的理想女/男友（/create 创建角色）
+• 海量精品角色等你来选
 • 细腻的文字描写能力，对话自然动人
-• 支持语音交互，可自定义声优
 • 支持白嫖，签到拉人均可获取积分，价格也不贵
 
 🎮 开始体验:
-1. 直接发送消息即可与默认女友"塞拉芬娜"对话
-2. 使用/list 查看角色列表，或在角色卡频道选择更多角色（高级用户：可发送酒馆v2 PNG格式角色卡来导入你喜欢的角色）
-3. 输入"/"查看所有互动指令"""
+1. 直接发送消息即可与默认女友"小鹿"对话
+2. 点击「选择角色」 查看角色图鉴，或在角色卡频道选择更多角色
+🌟 角色卡频道：https://t.me/ai_role_list""",
+                reply_markup=main_menu
             )
             
             # 2. 创建会话并绑定默认角色
@@ -188,6 +192,23 @@ class TextBot:
         content = update.message.text
         self.logger.info("📥 消息 user_id=%s text=%s", user_id, content)
 
+        # 处理底部主菜单按钮
+        if content == "👤 个人中心":
+            await self._handle_profile(update, user_id)
+            return
+        elif content == "💳 充值积分":
+            await self._handle_buy_credits(update, user_id)
+            return
+        elif content == "🎁 每日签到":
+            await self._handle_daily_checkin(update, user_id)
+            return
+        elif content == "🎭 选择角色":
+            await self._handle_role_selection(update, user_id)
+            return
+        elif content == "❓ 帮助":
+            await self._handle_help(update, user_id)
+            return
+
         # 调用内部函数，获取统一格式响应
         resp = await process_message(user_id=user_id, content=content)
 
@@ -206,6 +227,130 @@ class TextBot:
 
         self.logger.info("📥 消息 user_id=%s text=%s", update.effective_user.id, update.message.text)
 
+
+    # -------------------------
+    # 底部菜单处理方法
+    # -------------------------
+    async def _handle_profile(self, update: Update, user_id: str) -> None:
+        """处理个人中心"""
+        self.logger.info(f"👤 个人中心 user_id={user_id}")
+        
+        # TODO: 从数据库获取真实用户信息
+        profile_text = f"""👤 **个人中心**
+
+🆔 用户ID: `{user_id}`
+💰 当前积分: 100
+🎁 签到天数: 3
+📅 注册时间: 2025-01-01
+
+💡 提示：使用下方按钮查看更多详情
+"""
+        
+        keyboard = self.ui_handler.create_profile_menu_keyboard()
+        await update.message.reply_text(profile_text, reply_markup=keyboard, parse_mode='Markdown')
+    
+    async def _handle_buy_credits(self, update: Update, user_id: str) -> None:
+        """处理充值积分"""
+        self.logger.info(f"💳 充值积分 user_id={user_id}")
+        
+        # TODO: 实现真实的充值逻辑
+        buy_text = """💳 **充值积分**
+
+📦 充值套餐：
+• 💎 小额套餐：10元 = 100积分
+• 💎 标准套餐：30元 = 350积分
+• 💎 超值套餐：50元 = 600积分
+• 💎 豪华套餐：100元 = 1300积分
+
+💡 提示：首次充值享受额外赠送！
+
+⚠️ 充值功能开发中，敬请期待...
+"""
+        
+        await update.message.reply_text(buy_text, parse_mode='Markdown')
+    
+    async def _handle_daily_checkin(self, update: Update, user_id: str) -> None:
+        """处理每日签到"""
+        self.logger.info(f"🎁 每日签到 user_id={user_id}")
+        
+        # TODO: 实现真实的签到逻辑
+        checkin_text = """🎁 **每日签到**
+
+✅ 签到成功！
+🎉 获得 10 积分奖励
+
+📊 签到统计：
+• 连续签到：3天
+• 累计签到：15天
+• 本月签到：8天
+
+💡 提示：连续签到7天可获得额外奖励！
+"""
+        
+        await update.message.reply_text(checkin_text, parse_mode='Markdown')
+    
+    async def _handle_help(self, update: Update, user_id: str) -> None:
+        """处理帮助"""
+        self.logger.info(f"❓ 帮助 user_id={user_id}")
+        
+        help_text = """❓ **帮助中心**
+
+📚 **功能说明：**
+
+💬 **对话功能**
+• 直接发送消息与AI角色对话
+• 使用 /list 查看角色列表
+• 使用 /create 创建自定义角色
+
+👤 **个人中心**
+• 查看积分余额和签到记录
+• 查看订单历史
+• 管理个人资料
+
+💳 **充值积分**
+• 多种充值套餐可选
+• 首次充值享额外赠送
+• 支持多种支付方式
+
+🎁 **每日签到**
+• 每日签到获得免费积分
+• 连续签到获得额外奖励
+
+🔄 **重新生成**
+• 对AI回复不满意？点击"🔄 重新生成"按钮
+
+🆕 **新的对话**
+• 想要开始新话题？点击"🆕 新的对话"按钮
+
+📞 **联系我们：**
+• 遇到问题请联系客服
+• 客服Telegram: @support
+
+💡 更多功能开发中，敬请期待...
+"""
+        
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+    
+    async def _handle_role_selection(self, update: Update, user_id: str) -> None:
+        """处理选择角色"""
+        self.logger.info(f"🎭 选择角色 user_id={user_id}")
+        
+        role_text = """🎭 **选择你的专属角色**
+
+📚 在角色图鉴频道中浏览海量精品角色：
+• 🌟 经典人物角色
+• 💖 恋爱互动角色
+• 🎮 游戏动漫角色
+• ✨ 更多精品角色...
+
+💡 点击下方按钮进入角色图鉴频道 👇"""
+        
+        # 创建内联键盘，带URL按钮
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📚 浏览角色图鉴", url="https://t.me/ai_role_list")]
+        ])
+        
+        await update.message.reply_text(role_text, reply_markup=keyboard, parse_mode='Markdown')
 
      # -------------------------
     # 回调分发
