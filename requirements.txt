@@ -58,3 +58,5 @@ typing_extensions==4.15.0
 
 # ---- Telegram Bot ----
 python-telegram-bot==20.7
+Telethon>=1.34,<2.0
+PySocks>=1.7.1

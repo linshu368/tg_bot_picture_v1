@@ -16,7 +16,6 @@ from src.interfaces.telegram.handlers.callback.text_bot_callback_handler import 
 from src.interfaces.telegram.ui_handler import UIHandler
 from src.domain.services.role_service import RoleService
 from src.domain.services.session_service_base import session_service
-from src.utils.config.settings import get_text_settings
 
 
 class DummyService:
@@ -38,8 +37,6 @@ class TextBot:
         self.ui_handler = UIHandler()
         self.role_service = RoleService()
         self.default_role_id = "1" #默认角色ID
-        # 加载文字Bot配置
-        self.settings = get_text_settings()
         # ✅ 最小占位依赖，避免 BaseCallbackHandler 报错
         self.state_manager = DummyService()
         self.state_helper = DummyService()
@@ -152,9 +149,8 @@ class TextBot:
             
             # 1. 发送通用欢迎语（带底部主菜单）
             main_menu = self.ui_handler.create_main_menu_keyboard()
-            role_channel_url = self.settings.text_bot.role_channel_url
             await update.message.reply_text(
-                f"""让AI为你提供理想陪伴：
+                """让AI为你提供理想陪伴：
 • 💕 甜蜜的恋爱互动
 • 💌 深夜的暧昧幻想
 • 📝 令人社保的文爱体验
@@ -168,7 +164,7 @@ class TextBot:
 🎮 开始体验:
 1. 直接发送消息即可与默认女友"小鹿"对话
 2. 点击「选择角色」 查看角色图鉴，或在角色卡频道选择更多角色
-🌟 角色卡频道：{role_channel_url}""",
+🌟 角色卡频道：https://t.me/ai_role_list""",
                 reply_markup=main_menu
             )
             
@@ -349,10 +345,9 @@ class TextBot:
 
 💡 点击下方按钮进入角色图鉴频道 👇"""
         
-        # 创建内联键盘，使用配置中的URL
-        role_channel_url = self.settings.text_bot.role_channel_url
+        # 创建内联键盘，带URL按钮
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📚 浏览角色图鉴", url=role_channel_url)]
+            [InlineKeyboardButton("📚 浏览角色图鉴", url="https://t.me/ai_role_list")]
         ])
         
         await update.message.reply_text(role_text, reply_markup=keyboard, parse_mode='Markdown')
