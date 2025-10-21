@@ -4,7 +4,7 @@ import os
 import random
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -44,6 +44,47 @@ def should_publish_role(role: Dict[str, Any]) -> bool:
     return 'created_at' not in role or not role.get('created_at')
 
 
+def is_direct_image_url(url: str) -> bool:
+    """判断是否为直链图片"""
+    return bool(url and url.startswith('http') and 't.me/' not in url)
+
+
+async def resolve_avatar_to_direct_url(client: TelegramClient, avatar_url: str) -> Optional[str]:
+    """
+    将任何头像URL转换为直链
+    - 直链 → 直接返回
+    - 非直链（Telegram链接）→ 解析为CDN直链
+    """
+    if not avatar_url:
+        return None
+        
+    if is_direct_image_url(avatar_url):
+        # 情况2：已经是直链（Supabase等）
+        return avatar_url
+    
+    # 情况1：非直链，解析Telegram链接
+    import re
+    match = re.search(r't\.me/c/(\d+)/(\d+)', avatar_url)
+    if not match:
+        return None
+        
+    try:
+        channel_id, message_id = int(match.group(1)), int(match.group(2))
+        # Telegram 私有频道 ID 需要转换为负数
+        channel_id = -1000000000000 - channel_id
+        message = await client.get_messages(channel_id, ids=message_id)
+        
+        if message and message.media:
+            # file=None → 只返回CDN URL，不下载
+            cdn_url = await client.download_media(message.media, file=None)
+            print(f"📸 解析头像CDN直链: {cdn_url}")
+            return cdn_url
+    except Exception as e:
+        print(f"⚠️ 解析Telegram头像失败: {e}")
+    
+    return None
+
+
 def build_caption(role: Dict[str, Any]) -> str:
     name = role.get("name", "角色")
     summary = role.get("summary", "")
@@ -63,7 +104,19 @@ async def publish_role(client: TelegramClient, channel: str, role: Dict[str, Any
     """发布单个角色并更新数据"""
     try:
         caption = build_caption(role)
-        message = await client.send_message(channel, caption, parse_mode='md')
+        avatar_url = role.get('avatar')
+        
+        # 统一转换为直链
+        direct_url = await resolve_avatar_to_direct_url(client, avatar_url)
+        
+        if direct_url:
+            # 发送带图片的消息
+            message = await client.send_file(channel, direct_url, caption=caption, parse_mode='md')
+            print(f"📸 使用图片发布: {role.get('name', '未知')}")
+        else:
+            # 降级为纯文本
+            message = await client.send_message(channel, caption, parse_mode='md')
+            print(f"📝 降级为纯文本发布: {role.get('name', '未知')}")
         
         # 更新角色数据
         channel_username = channel.lstrip('@')
