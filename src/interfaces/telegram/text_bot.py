@@ -123,14 +123,38 @@ class TextBot:
                 session = await session_service.new_session(user_id, role_id)
                 self.logger.info(f"✅ 创建新会话: session_id={session['session_id']}, role_id={role_id}")
                 
-                # 3. 发送角色切换提示（带底部主菜单）
+                # 3. 发送角色切换提示 + 角色卡预览（合并消息）
                 main_menu = self.ui_handler.create_main_menu_keyboard()
-                await update.message.reply_text(
-                    f"✨ 已切换到角色：{role['name']}", 
-                    reply_markup=main_menu
-                )
+                post_link = role.get("post_link")
                 
-                # 4. 发送角色预置消息
+                if post_link:
+                    try:
+                        # 将切换提示作为链接文本，触发角色卡预览
+                        await update.message.reply_text(
+                            f"<a href=\"{post_link}\">✨ 已切换到角色：{role['name']}</a>",
+                            parse_mode="HTML",
+                            reply_markup=main_menu,
+                            disable_web_page_preview=False
+                        )
+                    except Exception as e:
+                        self.logger.error(f"❌ 发送角色卡预览失败: {e}")
+                        # 降级方案：分开发送
+                        await update.message.reply_text(
+                            f"✨ 已切换到角色：{role['name']}", 
+                            reply_markup=main_menu
+                        )
+                        await update.message.reply_text(
+                            post_link,
+                            disable_web_page_preview=False
+                        )
+                else:
+                    # 没有 post_link 时的普通提示
+                    await update.message.reply_text(
+                        f"✨ 已切换到角色：{role['name']}", 
+                        reply_markup=main_menu
+                    )
+                
+                # 5. 发送角色预置消息
                 await update.message.reply_text(role["predefined_messages"])
             else:
                 # 角色不存在，降级到默认角色
