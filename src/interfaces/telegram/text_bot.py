@@ -131,7 +131,7 @@ class TextBot:
                     try:
                         # 将切换提示作为链接文本，触发角色卡预览
                         await update.message.reply_text(
-                            f"<a href=\"{post_link}\">✨ 已切换到角色：{role['name']}</a>",
+                            f"<a href=\"{post_link}\">重新选择角色</a>",
                             parse_mode="HTML",
                             reply_markup=main_menu,
                             disable_web_page_preview=False
@@ -140,7 +140,7 @@ class TextBot:
                         self.logger.error(f"❌ 发送角色卡预览失败: {e}")
                         # 降级方案：分开发送
                         await update.message.reply_text(
-                            f"✨ 已切换到角色：{role['name']}", 
+                            "重新选择角色", 
                             reply_markup=main_menu
                         )
                         await update.message.reply_text(
@@ -150,7 +150,7 @@ class TextBot:
                 else:
                     # 没有 post_link 时的普通提示
                     await update.message.reply_text(
-                        f"✨ 已切换到角色：{role['name']}", 
+                        "重新选择角色", 
                         reply_markup=main_menu
                     )
                 
@@ -171,8 +171,11 @@ class TextBot:
         else:
             self.logger.info(f"🆕 正常启动，使用默认角色: role_id={self.default_role_id}")
             
-            # 1. 发送通用欢迎语（带底部主菜单）
+            # 1. 发送通用欢迎语（带底部主菜单和角色图鉴按钮）
             main_menu = self.ui_handler.create_main_menu_keyboard()
+            role_gallery_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📚 浏览角色图鉴", url="https://t.me/ai_role_list")]
+            ])
             await update.message.reply_text(
                 """让AI为你提供理想陪伴：
 • 💕 甜蜜的恋爱互动
@@ -187,9 +190,8 @@ class TextBot:
 
 🎮 开始体验:
 1. 直接发送消息即可与默认女友"小鹿"对话
-2. 点击「选择角色」 查看角色图鉴，或在角色卡频道选择更多角色
-🌟 角色卡频道：https://t.me/ai_role_list""",
-                reply_markup=main_menu
+2. 点击「选择角色」 查看角色图鉴，或在角色卡频道选择更多角色""",
+                reply_markup=role_gallery_keyboard
             )
             
             # 2. 创建会话并绑定默认角色
