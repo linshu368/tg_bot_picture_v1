@@ -8,6 +8,7 @@ from src.domain.services.session_service_base import session_service
 from src.domain.services.message_service import message_service
 from src.domain.services.ai_completion_port import ai_completion_port
 from src.domain.services.role_service import role_service
+from src.domain.services.snapshot_service import snapshot_service
 
 class TextBotCallbackHandler(BaseCallbackHandler):
     """文字 Bot 的回调处理器"""
@@ -21,6 +22,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         handlers = {
             "regenerate": self._on_regenerate,
             "new_session": self._on_new_session,
+            "save_snapshot": self._on_save_snapshot,
         }
         self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
         return handlers
@@ -130,3 +132,24 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         except Exception as e:
             self.logger.error(f"❌ 创建新对话失败: {e}")
             await self._update_message(query, "❌ 创建新对话失败，请重试", session_id="", user_message_id="")
+
+    @robust_callback_handler
+    async def _on_save_snapshot(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """点击 保存对话 按钮"""
+        user_id = str(query.from_user.id)
+        raw_data = query.data
+        parts = raw_data.split(":")
+        session_id = parts[1] if len(parts) > 1 else None
+        self.logger.info(f"📥 保存对话请求: user_id={user_id}, session_id={session_id}")
+
+        if not session_id:
+            await query.answer("❌ 无效的会话")
+            return
+
+        try:
+            snapshot_id = await snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, name=None)
+            self.logger.info(f"✅ 快照已保存: snapshot_id={snapshot_id}")
+            await query.answer("✅ 保存成功")
+        except Exception as e:
+            self.logger.error(f"❌ 保存对话失败: {e}")
+            await query.answer("❌ 保存失败，请重试")

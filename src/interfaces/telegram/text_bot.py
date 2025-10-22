@@ -131,7 +131,7 @@ class TextBot:
                     try:
                         # 将切换提示作为链接文本，触发角色卡预览
                         await update.message.reply_text(
-                            f"<a href=\"{post_link}\">重新选择角色</a>",
+                            f"<a href=\"{post_link}\">回到角色卡频道</a>",
                             parse_mode="HTML",
                             reply_markup=main_menu,
                             disable_web_page_preview=False
@@ -140,7 +140,7 @@ class TextBot:
                         self.logger.error(f"❌ 发送角色卡预览失败: {e}")
                         # 降级方案：分开发送
                         await update.message.reply_text(
-                            "重新选择角色", 
+                            "回到角色卡频道", 
                             reply_markup=main_menu
                         )
                         await update.message.reply_text(
@@ -150,7 +150,7 @@ class TextBot:
                 else:
                     # 没有 post_link 时的普通提示
                     await update.message.reply_text(
-                        "重新选择角色", 
+                        "回到角色卡频道", 
                         reply_markup=main_menu
                     )
                 
@@ -230,6 +230,9 @@ class TextBot:
             return
         elif content == "🎭 选择角色":
             await self._handle_role_selection(update, user_id)
+            return
+        elif content == "🗂 历史聊天":
+            await self._handle_history_placeholder(update, user_id)
             return
         elif content == "❓ 帮助":
             await self._handle_help(update, user_id)
@@ -356,6 +359,11 @@ class TextBot:
 """
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
+    
+    async def _handle_history_placeholder(self, update: Update, user_id: str) -> None:
+        """处理历史聊天（P0 占位）"""
+        self.logger.info(f"🗂 历史聊天占位 user_id={user_id}")
+        await update.message.reply_text("🗂 历史聊天功能即将上线，敬请期待")
     
     async def _handle_role_selection(self, update: Update, user_id: str) -> None:
         """处理选择角色"""

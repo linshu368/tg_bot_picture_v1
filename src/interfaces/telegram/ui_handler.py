@@ -7,27 +7,25 @@ class UIHandler:
     @staticmethod
     def build_reply_keyboard(session_id: str="", user_message_id: str="") -> InlineKeyboardMarkup:
         """生成消息下方的操作按钮（内联键盘）"""
-        # 如果 user_message_id 为空，就不要生成 regenerate 按钮，避免非法 callback_data
-        if not session_id or not user_message_id:
+        # 情况1：没有 session_id，仅提供新对话
+        if not session_id:
             logging.warning(f"⚠️ callback_data 被禁用: session_id={session_id}, user_message_id={user_message_id}")
-            keyboard = [
-                [InlineKeyboardButton("🆕 新的对话", callback_data="new_session")]
-            ]
+            keyboard = [[InlineKeyboardButton("🆕 新的对话", callback_data="new_session")]]
+        # 情况2：有 session_id 但没有 user_message_id，不显示重新生成，但允许保存对话
+        elif not user_message_id:
+            keyboard = [[
+                InlineKeyboardButton("🆕 新的对话", callback_data="new_session"),
+                InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
+            ]]
+        # 情况3：二者都有，显示三键
         else:
             callback_data = f"regenerate:{session_id}:{user_message_id}"
             logging.info(f"✅ callback_data={callback_data}")
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "🔄 重新生成", 
-                        callback_data=callback_data
-                    ),
-                    InlineKeyboardButton(
-                        "🆕 新的对话", 
-                        callback_data="new_session"
-                    ),
-                ]
-            ]
+            keyboard = [[
+                InlineKeyboardButton("🔄 重新生成", callback_data=callback_data),
+                InlineKeyboardButton("🆕 新的对话", callback_data="new_session"),
+                InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
+            ]]
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
@@ -37,6 +35,7 @@ class UIHandler:
             [KeyboardButton("💳 充值积分")],
             [KeyboardButton("👤 个人中心"), KeyboardButton("🎁 每日签到")],
             [KeyboardButton("🎭 选择角色")],
+            [KeyboardButton("🗂 历史聊天")],
             [KeyboardButton("❓ 帮助")],
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
