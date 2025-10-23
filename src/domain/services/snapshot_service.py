@@ -20,7 +20,7 @@ class SnapshotService:
     def __init__(self):
         self.repo = SnapshotRepositoryV2()
 
-    async def save_snapshot(self, user_id: str, session_id: str, name: Optional[str] = None) -> str:
+    async def save_snapshot(self, user_id: str, session_id: str, user_title: Optional[str] = None) -> str:
         # 1. 读取会话历史（实际交互内容）
         history = message_service.get_history(session_id) or []
         session_messages: List[Dict[str, str]] = [
@@ -47,18 +47,19 @@ class SnapshotService:
             except Exception:
                 role_history = []
 
-        # 3. 生成名称
-        if not name or not name.strip():
-            role_name = role_data.get("name") if role_data else "对话"
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            name = f"{role_name}_{ts}"
+        # 3. 生成展示名称：{YYYYMMDD_HHMMSS}_{用户命名或未命名}_{角色名-简介}
+        ts = datetime.now().strftime("%Y%m%d")
+        safe_title = (user_title or "").strip() or "未命名"
+        role_name = (role_data.get("name") if role_data else "未知角色") or "未知角色"
+        role_summary = (role_data.get("summary") if role_data else "") or ""
+        display_name = f"{ts}_{safe_title}_{role_name}-{role_summary}" if role_summary else f"{ts}_{safe_title}_{role_name}"
 
         # 4. 生成快照并写入
         snapshot_id = uuid.uuid4().hex
         snapshot: Dict[str, Any] = {
             "snapshot_id": snapshot_id,
             "user_id": user_id,
-            "name": name,
+            "name": display_name,
             "model": model or "",
             "system_prompt": system_prompt or "",
             # 合并顺序：角色预置历史在前 → 实际会话历史在后

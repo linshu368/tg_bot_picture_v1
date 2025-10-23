@@ -9,6 +9,7 @@ from src.domain.services.message_service import message_service
 from src.domain.services.ai_completion_port import ai_completion_port
 from src.domain.services.role_service import role_service
 from src.domain.services.snapshot_service import snapshot_service
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
 class TextBotCallbackHandler(BaseCallbackHandler):
     """文字 Bot 的回调处理器"""
@@ -23,6 +24,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             "regenerate": self._on_regenerate,
             "new_session": self._on_new_session,
             "save_snapshot": self._on_save_snapshot,
+            "save_snapshot_direct": self._on_save_snapshot_direct,
         }
         self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
         return handlers
@@ -147,9 +149,39 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             return
 
         try:
-            snapshot_id = await snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, name=None)
-            self.logger.info(f"✅ 快照已保存: snapshot_id={snapshot_id}")
-            await query.answer("✅ 保存成功")
+            # 标记命名待输入（进程内状态）
+            setattr(self.bot, "pending_snapshot", getattr(self.bot, "pending_snapshot", {}))
+            self.bot.pending_snapshot[user_id] = {"session_id": session_id}
+
+            # 提示用户输入名称，附带“直接保存（未命名）”按钮
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("直接保存", callback_data=f"save_snapshot_direct:{session_id}")]])
+            await query.message.reply_text(
+                "请发送本次历史聊天的名称，或点击下方按钮直接保存",
+                reply_markup=keyboard
+            )
+            await query.answer()
         except Exception as e:
             self.logger.error(f"❌ 保存对话失败: {e}")
+            await query.answer("❌ 保存失败，请重试")
+
+    @robust_callback_handler
+    async def _on_save_snapshot_direct(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """直接保存"""
+        user_id = str(query.from_user.id)
+        raw_data = query.data
+        parts = raw_data.split(":")
+        session_id = parts[1] if len(parts) > 1 else None
+        if not session_id:
+            await query.answer("❌ 无效的会话")
+            return
+        try:
+            snapshot_id = await snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title="未命名")
+            self.logger.info(f"✅ 快照已保存(直接): snapshot_id={snapshot_id}")
+            # 清理可能存在的命名态
+            if getattr(self.bot, "pending_snapshot", None):
+                self.bot.pending_snapshot.pop(user_id, None)
+            await query.answer()
+            await query.message.reply_text("✅ 保存成功，可在主菜单点击「🗂 历史聊天」查看保存结果")
+        except Exception as e:
+            self.logger.error(f"❌ 直接保存失败: {e}")
             await query.answer("❌ 保存失败，请重试")

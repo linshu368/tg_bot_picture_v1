@@ -16,6 +16,7 @@ from src.interfaces.telegram.handlers.callback.text_bot_callback_handler import 
 from src.interfaces.telegram.ui_handler import UIHandler
 from src.domain.services.role_service import RoleService
 from src.domain.services.session_service_base import session_service
+from src.domain.services.snapshot_service import snapshot_service
 
 
 class DummyService:
@@ -45,6 +46,8 @@ class TextBot:
         self.payment_service = DummyService()
         # --------------------------------------------------
         self.callback_handler = TextBotCallbackHandler(self)
+        # 用于保存快照命名的临时状态：user_id -> {session_id}
+        self.pending_snapshot = {}
         
     # ------------------------
     # Public APIs
@@ -217,6 +220,21 @@ class TextBot:
         user_id = str(update.effective_user.id) if update.effective_user else "unknown"
         content = update.message.text
         self.logger.info("📥 消息 user_id=%s text=%s", user_id, content)
+
+        # 命名态拦截：优先处理保存快照命名
+        if self.pending_snapshot.get(user_id):
+            session_id = self.pending_snapshot[user_id].get("session_id")
+            try:
+                title = content.strip() if content.strip() else "未命名"
+                snapshot_id = await snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title=title)
+                self.logger.info(f"✅ 快照已保存(命名): snapshot_id={snapshot_id}")
+                await update.message.reply_text("✅ 保存成功，可在主菜单点击「🗂 历史聊天」查看保存结果")
+            except Exception as e:
+                self.logger.error(f"❌ 保存快照失败(命名): {e}")
+                await update.message.reply_text("❌ 保存失败，请重试")
+            finally:
+                self.pending_snapshot.pop(user_id, None)
+            return
 
         # 处理底部主菜单按钮
         if content == "👤 个人中心":
