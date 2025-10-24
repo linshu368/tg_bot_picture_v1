@@ -113,6 +113,13 @@ class TextBot:
         deep_link_param = context.args[0] if context.args else None
         self.logger.info(f"📥 Deep Link参数: {deep_link_param}")
         
+        # 情况C：Deep Link 快照预览
+        if deep_link_param and deep_link_param.startswith("snap_"):
+            snapshot_id = deep_link_param.replace("snap_", "")
+            self.logger.info(f"🔍 打开快照预览: snapshot_id={snapshot_id}")
+            await self._handle_snapshot_preview(update, context, user_id, snapshot_id)
+            return
+        
         # 情况B：Deep Link 角色切换
         if deep_link_param and deep_link_param.startswith("role_"):
             role_id = deep_link_param.replace("role_", "")
@@ -209,6 +216,53 @@ class TextBot:
                 await update.message.reply_text(role["predefined_messages"])
             else:
                 await update.message.reply_text("❌ 默认角色不存在")
+
+    async def _handle_snapshot_preview(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: str, snapshot_id: str) -> None:
+        """通过 deeplink 打开某个快照的预览：角色卡预览 + 最后一条消息 + 操作按钮"""
+        try:
+            snap = await snapshot_service.get_snapshot(user_id=user_id, snapshot_id=snapshot_id)
+        except Exception as e:
+            self.logger.error(f"❌ 获取快照失败: {e}")
+            await update.message.reply_text("❌ 获取快照失败")
+            return
+
+        if not snap:
+            await update.message.reply_text("❌ 快照不存在或无权访问")
+            return
+
+        role_id = snap.get("role_id")
+        role = self.role_service.get_role_by_id(role_id) if role_id else None
+
+        # 1) 角色卡预览（如有）
+        post_link = role.get("post_link") if role else None
+        if post_link:
+            try:
+                await update.message.reply_text(
+                    f"<a href=\"{post_link}\">回到角色卡频道</a>",
+                    parse_mode="HTML",
+                    disable_web_page_preview=False
+                )
+            except Exception as e:
+                self.logger.error(f"❌ 发送角色卡预览失败: {e}")
+                await update.message.reply_text(post_link, disable_web_page_preview=False)
+
+        # 2) 发送最后一条消息（不截断）
+        messages = snap.get("messages", [])
+        if messages:
+            last_msg = messages[-1]
+            content = last_msg.get("content", "")
+            preview_text = f"最新对话:\n{content}"
+            await update.message.reply_text(preview_text)
+
+        # 3) 操作键盘：继续聊天 / 删除记忆
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("继续聊天", callback_data=f"open_snapshot:{snapshot_id}"),
+                InlineKeyboardButton("删除记忆", callback_data=f"delete_snapshot:{snapshot_id}"),
+            ]
+        ])
+        await update.message.reply_text("请选择要进行的操作", reply_markup=keyboard)
 
     # -------------------------
     # 消息处理

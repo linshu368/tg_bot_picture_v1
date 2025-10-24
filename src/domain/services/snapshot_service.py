@@ -82,6 +82,9 @@ class SnapshotService:
     async def delete_snapshot(self, user_id: str, snapshot_id: str) -> bool:
         return self.repo.delete(user_id=user_id, snapshot_id=snapshot_id)
 
+    async def get_snapshot(self, user_id: str, snapshot_id: str) -> Optional[Dict[str, Any]]:
+        return self.repo.get(user_id=user_id, snapshot_id=snapshot_id)
+
 
 # ✅ 全局唯一实例
 snapshot_service = SnapshotService()
