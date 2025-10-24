@@ -25,6 +25,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             "new_session": self._on_new_session,
             "save_snapshot": self._on_save_snapshot,
             "save_snapshot_direct": self._on_save_snapshot_direct,
+            "delete_snapshot": self._on_delete_snapshot,
         }
         self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
         return handlers
@@ -185,3 +186,24 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         except Exception as e:
             self.logger.error(f"❌ 直接保存失败: {e}")
             await query.answer("❌ 保存失败，请重试")
+
+    @robust_callback_handler
+    async def _on_delete_snapshot(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """删除记忆（硬删除）"""
+        user_id = str(query.from_user.id)
+        raw_data = query.data
+        parts = raw_data.split(":")
+        snapshot_id = parts[1] if len(parts) > 1 else None
+        if not snapshot_id:
+            await query.answer("❌ 无效的快照")
+            return
+        try:
+            ok = await snapshot_service.delete_snapshot(user_id=user_id, snapshot_id=snapshot_id)
+            if ok:
+                await query.edit_message_text("🗑️ 已删除该记忆\n可在主菜单点击「🗂 历史聊天」查看当前记录")
+                await query.answer()
+            else:
+                await query.answer("❌ 快照不存在或无权访问")
+        except Exception as e:
+            self.logger.error(f"❌ 删除记忆失败: {e}")
+            await query.answer("❌ 删除失败，请重试")
