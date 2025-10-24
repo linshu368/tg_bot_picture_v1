@@ -228,7 +228,7 @@ class TextBot:
                 title = content.strip() if content.strip() else "未命名"
                 snapshot_id = await snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title=title)
                 self.logger.info(f"✅ 快照已保存(命名): snapshot_id={snapshot_id}")
-                await update.message.reply_text("✅ 保存成功，可在主菜单点击「🗂 历史聊天」查看保存结果")
+                await update.message.reply_text("✅ 保存成功，可在主菜单点击「🗂 历史聊天」查看保存结果。也可直接发送消息继续对话")
             except Exception as e:
                 self.logger.error(f"❌ 保存快照失败(命名): {e}")
                 await update.message.reply_text("❌ 保存失败，请重试")
@@ -250,7 +250,7 @@ class TextBot:
             await self._handle_role_selection(update, user_id)
             return
         elif content == "🗂 历史聊天":
-            await self._handle_history_placeholder(update, user_id)
+            await self._handle_history_list(update, context, user_id)
             return
         elif content == "❓ 帮助":
             await self._handle_help(update, user_id)
@@ -378,10 +378,43 @@ class TextBot:
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
     
-    async def _handle_history_placeholder(self, update: Update, user_id: str) -> None:
-        """处理历史聊天（P0 占位）"""
-        self.logger.info(f"🗂 历史聊天占位 user_id={user_id}")
-        await update.message.reply_text("🗂 历史聊天功能即将上线，敬请期待")
+    async def _handle_history_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: str) -> None:
+        """历史聊天列表：以 deeplink 链接形式展示最近快照"""
+        self.logger.info(f"🗂 历史聊天列表 user_id={user_id}")
+        try:
+            snapshots = await snapshot_service.list_snapshots(user_id)
+        except Exception as e:
+            self.logger.error(f"❌ 拉取历史聊天失败: {e}")
+            await update.message.reply_text("❌ 拉取历史聊天失败，请稍后重试")
+            return
+
+        if not snapshots:
+            await update.message.reply_text("🗂 暂无历史聊天")
+            return
+
+        # 获取 Bot 用户名用于生成 deeplink
+        username = getattr(context.bot, "username", None)
+        if not username:
+            try:
+                me = await context.bot.get_me()
+                username = me.username
+            except Exception:
+                username = None
+
+        if not username:
+            await update.message.reply_text("❌ 无法生成历史聊天链接（缺少 Bot 用户名配置）")
+            return
+
+        # 取前10条，按 created_at 已在服务层倒序
+        lines = []
+        for s in snapshots[:10]:
+            sid = s.get("snapshot_id", "")
+            name = s.get("name", sid)
+            url = f"https://t.me/{username}?start=snap_{sid}"
+            lines.append(f"<a href=\"{url}\">{name}</a>")
+
+        text = "\n".join(lines)
+        await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
     
     async def _handle_role_selection(self, update: Update, user_id: str) -> None:
         """处理选择角色"""

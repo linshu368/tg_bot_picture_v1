@@ -59,6 +59,7 @@ class SnapshotService:
         snapshot: Dict[str, Any] = {
             "snapshot_id": snapshot_id,
             "user_id": user_id,
+            "role_id": role_id or "",
             "name": display_name,
             "model": model or "",
             "system_prompt": system_prompt or "",
@@ -77,6 +78,9 @@ class SnapshotService:
             return sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
         except Exception:
             return items
+
+    async def delete_snapshot(self, user_id: str, snapshot_id: str) -> bool:
+        return self.repo.delete(user_id=user_id, snapshot_id=snapshot_id)
 
 
 # ✅ 全局唯一实例

@@ -89,4 +89,24 @@ class SnapshotRepositoryV2:
         snaps = self._read_list(self.snaps_file)
         return next((s for s in snaps if s.get("snapshot_id") == snapshot_id), None)
 
+    def delete(self, user_id: str, snapshot_id: str) -> bool:
+        """硬删除：从 snapshots.json 移除快照，并同步从 users.json 的 snapshot_ids 移除。"""
+        changed = False
+        # 1) 删除 snapshots.json 中的记录
+        snaps = self._read_list(self.snaps_file)
+        new_snaps = [s for s in snaps if s.get("snapshot_id") != snapshot_id]
+        if len(new_snaps) != len(snaps):
+            self._atomic_write(self.snaps_file, new_snaps)
+            changed = True
+
+        # 2) 从 users.json 对应用户移除 snapshot_id
+        users = self._read_list(self.users_file)
+        user = next((u for u in users if u.get("user_id") == user_id), None)
+        if user and snapshot_id in set(user.get("snapshot_ids", [])):
+            user["snapshot_ids"] = [sid for sid in user.get("snapshot_ids", []) if sid != snapshot_id]
+            self._atomic_write(self.users_file, users)
+            changed = True
+
+        return changed
+
 
