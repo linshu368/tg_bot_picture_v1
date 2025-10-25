@@ -159,6 +159,8 @@ async def new_session(input_dto: NewSessionInput):
 async def process_message(user_id: str, content: str, role_id: str = None) -> Dict[str, Any]:
     """供 Bot 内部直接调用的简化版接口（绕过 HTTP 层）
     
+    注意：此函数已被 text_bot.py 中的流式处理替代，保留作为备用或非流式场景使用
+    
     Args:
         user_id: 用户ID
         content: 消息内容

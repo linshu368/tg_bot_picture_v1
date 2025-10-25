@@ -310,24 +310,142 @@ class TextBot:
             await self._handle_help(update, user_id)
             return
 
-        # 调用内部函数，获取统一格式响应
-        resp = await process_message(user_id=user_id, content=content)
-
-        if resp["code"] == 0:
-            data = resp["data"]
-            reply_text = data["reply"]
-            reply_markup = self.ui_handler.build_reply_keyboard(
-                session_id=data.get("session_id", ""),
-                user_message_id=data.get("user_message_id", "")
-            )
-        else:
-            reply_text = f"❌ 出错: {resp['message']} (code={resp['code']})"
-            reply_markup = None
-
-        await update.message.reply_text(reply_text, reply_markup=reply_markup)
+        # 使用流式回复处理消息
+        await self._handle_stream_message(update, user_id, content)
 
         self.logger.info("📥 消息 user_id=%s text=%s", update.effective_user.id, update.message.text)
 
+    async def _handle_stream_message(self, update: Update, user_id: str, content: str) -> None:
+        """处理流式回复消息"""
+        try:
+            # 1. 发送初始"思考中"消息
+            initial_msg = await update.message.reply_text("✍️输入中...")
+            
+            # 2. 获取会话和角色信息（复用 process_message 的逻辑）
+            session_info = await self._get_session_and_role(user_id, content)
+            
+            if session_info["code"] != 0:
+                # 处理错误情况
+                error_text = f"❌ 出错: {session_info['message']} (code={session_info['code']})"
+                await initial_msg.edit_text(error_text)
+                return
+            
+            data = session_info["data"]
+            session_id = data["session_id"]
+            role_data = data["role_data"]
+            history = data["history"]
+            context_source = data.get("context_source")
+            
+            # 3. 流式生成回复
+            accumulated_text = ""
+            last_update_time = 0
+            update_interval = 0.5  # 每0.5秒最多更新一次，避免API限制
+            min_chars_for_update = 10  # 至少积累10个字符才更新
+            
+            from src.domain.services.ai_completion_port import ai_completion_port
+            import time
+            
+            async for chunk in ai_completion_port.generate_reply_stream(
+                role_data=role_data,
+                history=history,
+                user_input=content,
+                session_context_source=context_source
+            ):
+                accumulated_text += chunk
+                current_time = time.time()
+                
+                # 控制更新频率：时间间隔 + 字符数阈值
+                if (current_time - last_update_time >= update_interval and 
+                    len(accumulated_text) >= min_chars_for_update) or len(accumulated_text) > 100:
+                    
+                    try:
+                        await initial_msg.edit_text(accumulated_text)
+                        last_update_time = current_time
+                    except Exception as e:
+                        # 忽略编辑消息的错误（如内容相同、频率限制等）
+                        self.logger.debug(f"编辑消息失败: {e}")
+            
+            # 4. 最终更新完整消息
+            if accumulated_text:
+                try:
+                    # 添加回复键盘
+                    reply_markup = self.ui_handler.build_reply_keyboard(
+                        session_id=session_id,
+                        user_message_id=data.get("user_message_id", "")
+                    )
+                    await initial_msg.edit_text(accumulated_text, reply_markup=reply_markup)
+                except Exception as e:
+                    self.logger.error(f"最终更新消息失败: {e}")
+                
+                # 5. 保存完整回复到数据库
+                from src.domain.services.message_service import message_service
+                message_service.save_message(session_id, "assistant", accumulated_text)
+            else:
+                await initial_msg.edit_text("❌ 生成回复失败，请重试")
+                
+        except Exception as e:
+            self.logger.error(f"流式消息处理失败: {e}")
+            try:
+                await initial_msg.edit_text(f"❌ 处理失败: {str(e)}")
+            except:
+                await update.message.reply_text(f"❌ 处理失败: {str(e)}")
+
+    async def _get_session_and_role(self, user_id: str, content: str) -> dict:
+        """获取会话和角色信息（从 process_message 提取的逻辑）"""
+        from src.domain.services.session_service_base import session_service
+        from src.domain.services.message_service import message_service
+        from src.domain.services.role_service import role_service
+        
+        # 简单校验
+        if len(content) > 10000:
+            return {"code": 4002, "message": "消息过长，最大长度 10000", "data": None}
+
+        # 获取或创建会话
+        session = await session_service.get_or_create_session(user_id)
+        session_id = session["session_id"]
+        
+        # 获取会话的角色ID
+        current_role_id = session.get("role_id")
+        
+        # 兜底机制：如果会话没有角色ID，设置默认角色
+        if not current_role_id:
+            self.logger.warning(f"⚠️ 会话无角色ID，触发兜底机制: user_id={user_id}, session_id={session_id}")
+            default_role_id = '1'
+            await session_service.set_session_role_id(session_id, default_role_id)
+            current_role_id = default_role_id
+        
+        # 获取角色数据
+        role_data = role_service.get_role_by_id(current_role_id)
+        if not role_data:
+            # 二次降级：角色ID对应的角色不存在
+            self.logger.warning(f"⚠️ 角色不存在: role_id={current_role_id}，降级到默认角色")
+            default_role_id = '1'
+            role_data = role_service.get_role_by_id(default_role_id)
+            if role_data:
+                await session_service.set_session_role_id(session_id, default_role_id)
+        
+        if not role_data:
+            self.logger.error(f"❌ 角色配置错误: 默认角色也不存在")
+            return {"code": 4001, "message": "角色配置错误", "data": None}
+
+        # 保存用户消息并获取历史
+        user_message_id = message_service.save_message(session_id, "user", content)
+        history = message_service.get_history(session_id)
+        
+        # 获取会话上下文来源
+        context_source = session.get("context_source") if session else None
+        
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "session_id": session_id,
+                "user_message_id": user_message_id,
+                "role_data": role_data,
+                "history": history,
+                "context_source": context_source
+            }
+        }
 
     # -------------------------
     # 底部菜单处理方法
