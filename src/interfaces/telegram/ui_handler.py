@@ -14,7 +14,7 @@ class UIHandler:
         # 情况2：有 session_id 但没有 user_message_id，不显示重新生成，但允许保存对话
         elif not user_message_id:
             keyboard = [[
-                InlineKeyboardButton("🆕 新的对话", callback_data="new_session"),
+                InlineKeyboardButton("🆕 新的对话", callback_data=f"new_session:{session_id}"),
                 InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
             ]]
         # 情况3：二者都有，显示三键
@@ -23,7 +23,7 @@ class UIHandler:
             logging.info(f"✅ callback_data={callback_data}")
             keyboard = [[
                 InlineKeyboardButton("🔄 重新生成", callback_data=callback_data),
-                InlineKeyboardButton("🆕 新的对话", callback_data="new_session"),
+                InlineKeyboardButton("🆕 新的对话", callback_data=f"new_session:{session_id}"),
                 InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
             ]]
         return InlineKeyboardMarkup(keyboard)

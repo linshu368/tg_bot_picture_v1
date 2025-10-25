@@ -46,12 +46,15 @@ class MessageService:
         return history
        
 
-    async def regenerate_reply(self, session_id: str, last_message_id: str, ai_port, role_data):
+    async def regenerate_reply(self, session_id: str, last_message_id: str, ai_port, role_data, session_context_source=None):
         """
         基于指定用户消息重新生成回复
         - 精确定位 last_message_id
         - 删除旧的 Bot 回复
         - 保存新的 Bot 回复
+        
+        Args:
+            session_context_source: 会话上下文来源，"snapshot" 表示快照会话
         """
         history = self.get_history(session_id)
         import logging
@@ -85,8 +88,8 @@ class MessageService:
         self._store[session_id] = history
         logger.info(f"[DEBUG] regenerate_reply: trimmed history={history}")
 
-        # 3. 重新生成 AI 回复
-        reply = await ai_port.generate_reply(role_data, history, user_input)
+        # 3. 重新生成 AI 回复（传入上下文来源避免重复添加角色预置对话）
+        reply = await ai_port.generate_reply(role_data, history, user_input, session_context_source=session_context_source)
         logger.info(f"[DEBUG] regenerate_reply: new reply={reply}")
 
         # 4. 保存新的 Bot 回复

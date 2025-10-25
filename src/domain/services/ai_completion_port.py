@@ -6,9 +6,23 @@ class AICompletionPort:
     def __init__(self, gpt_caller):
         self.gpt = gpt_caller
 
-    async def generate_reply(self, role_data, history, user_input, timeout=30):
+    async def generate_reply(self, role_data, history, user_input, timeout=30, session_context_source=None):
+        """
+        生成AI回复
+        
+        Args:
+            role_data: 角色配置数据
+            history: 会话历史消息
+            user_input: 当前用户输入
+            timeout: 超时时间
+            session_context_source: 会话上下文来源标记，"snapshot" 表示来自快照会话
+        
+        说明：
+            - 常规会话: system_prompt + role_data.history + MessageService历史
+            - 快照会话: system_prompt + MessageService历史（已含快照完整上下文，跳过role_data.history避免重复）
+        """
         # 打印输入的历史记录
-        print(f"🧠 AI生成回复 | 输入历史记录数量: {len(history)}")
+        print(f"🧠 AI生成回复 | 输入历史记录数量: {len(history)} | 上下文来源: {session_context_source or '常规'}")
         if history:
             print("📜 输入历史记录:")
             for i, msg in enumerate(history):
@@ -22,10 +36,19 @@ class AICompletionPort:
 
         # 构建 prompt
         messages = []
+        
+        # 1. 添加 system_prompt
         if "system_prompt" in role_data:
             messages.append({"role": "system", "content": role_data["system_prompt"]})
-        if "history" in role_data:
+        
+        # 2. 仅在非快照会话时添加角色预置 history（避免重复）
+        if session_context_source != "snapshot" and "history" in role_data:
             messages.extend(role_data["history"])
+            print(f"✅ 添加角色预置对话: {len(role_data.get('history', []))} 条")
+        elif session_context_source == "snapshot":
+            print(f"⏭️ 跳过角色预置对话（快照会话已包含完整上下文）")
+        
+        # 3. 添加实际会话历史
         messages.extend(history)
         # 注意：不再额外添加 user_input，因为它已经在 history 中了
 

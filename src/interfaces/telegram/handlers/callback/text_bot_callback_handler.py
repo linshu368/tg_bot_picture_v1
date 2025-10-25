@@ -26,6 +26,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             "save_snapshot": self._on_save_snapshot,
             "save_snapshot_direct": self._on_save_snapshot_direct,
             "delete_snapshot": self._on_delete_snapshot,
+            "open_snapshot": self._on_open_snapshot,
         }
         self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
         return handlers
@@ -82,12 +83,17 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 
             self.logger.info(f"✅ 使用角色: {role_data.get('name', 'Unknown')} (ID: {role_data.get('role_id', 'Unknown')})")
             
-            # 3. 重新生成回复
+            # 3. 获取会话上下文来源（判断是否为快照会话）
+            session_obj = await session_service.get_session(session_id)
+            context_source = session_obj.get("context_source") if session_obj else None
+            
+            # 4. 重新生成回复（传入上下文来源避免重复添加角色预置对话）
             result = await message_service.regenerate_reply(
                 session_id=session_id,
                 last_message_id=user_message_id,   # ✅ 用 user_message_id 精确定位
                 ai_port=ai_completion_port,
                 role_data=role_data,  # ✅ 使用动态获取的角色数据
+                session_context_source=context_source  # ✅ 传入上下文来源
             )
             reply = result["reply"]
             await self._update_message(query, reply, session_id=session_id, user_message_id=user_message_id)
@@ -207,3 +213,51 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         except Exception as e:
             self.logger.error(f"❌ 删除记忆失败: {e}")
             await query.answer("❌ 删除失败，请重试")
+
+    @robust_callback_handler
+    async def _on_open_snapshot(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """基于快照开启新对话"""
+        user_id = str(query.from_user.id)
+        raw_data = query.data
+        parts = raw_data.split(":")
+        snapshot_id = parts[1] if len(parts) > 1 else None
+        if not snapshot_id:
+            await query.answer("❌ 无效的快照")
+            return
+
+        try:
+            # 1) 读取快照并校验归属
+            snap = await snapshot_service.get_snapshot(user_id=user_id, snapshot_id=snapshot_id)
+            if not snap:
+                await query.answer("❌ 快照不存在或无权访问")
+                return
+
+            role_id = snap.get("role_id") or getattr(self.bot, 'default_role_id', '1')
+
+            # 2) 创建新会话并绑定角色
+            new_session = await session_service.new_session(user_id, role_id)
+            new_session_id = new_session["session_id"]
+
+            # 3) 预置历史消息（快照中的 messages 已包含预置与实际）
+            messages = snap.get("messages", [])
+            for m in messages:
+                role = m.get("role", "")
+                content = m.get("content", "")
+                if role and content:
+                    message_service.save_message(new_session_id, role, content)
+
+            # 4) 写入会话上下文覆写（MVP：直接附加到会话字典）
+            session_obj = await session_service.get_session(new_session_id)
+            if session_obj is not None:
+                session_obj["model"] = snap.get("model", "")
+                session_obj["system_prompt"] = snap.get("system_prompt", "")
+                session_obj["context_source"] = "snapshot"
+
+            # 5) 用户反馈
+            role_data = role_service.get_role_by_id(role_id)
+            role_name = role_data.get('name', '未知角色') if role_data else '未知角色'
+            welcome_msg = f"🆕 已基于快照开启新对话\n\n💫 当前角色：{role_name}"
+            await self._update_message(query, welcome_msg, session_id=new_session_id, user_message_id="")
+        except Exception as e:
+            self.logger.error(f"❌ 打开快照失败: {e}")
+            await self._update_message(query, "❌ 创建新对话失败，请重试", session_id="", user_message_id="")

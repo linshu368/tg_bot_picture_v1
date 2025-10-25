@@ -218,8 +218,12 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
     user_message_id = message_service.save_message(session_id, "user", content)
     history = message_service.get_history(session_id)
     
+    # 获取会话上下文来源（判断是否为快照会话）
+    context_source = session.get("context_source") if session else None
+    
     try:
-        reply = await ai_completion_port.generate_reply(role_data, history, content)
+        # 传入上下文来源避免重复添加角色预置对话
+        reply = await ai_completion_port.generate_reply(role_data, history, content, session_context_source=context_source)
     except TimeoutError:
         return envelope_error(4004, "生成超时，请重试")
     except Exception as e:
