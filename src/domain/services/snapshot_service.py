@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from src.domain.services.message_service import message_service
 from src.domain.services.session_service_base import session_service
 from src.domain.services.role_service import role_service
-from src.infrastructure.repositories_v2.single.snapshot_repository_v2 import SnapshotRepositoryV2
+from src.infrastructure.repositories_v2.snapshot_repository_v2 import SnapshotRepositoryV2
 
 
 class SnapshotService:

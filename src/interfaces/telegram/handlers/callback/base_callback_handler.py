@@ -4,12 +4,11 @@
 """
 
 import logging
-from typing import Dict
+from typing import Dict, Any
 
 from telegram import InlineKeyboardMarkup
 
 from ...ui_handler import UIHandler
-from ...user_state_manager import UserStateManager, UserStateHelper
 
 
 def robust_callback_handler(func):
@@ -45,8 +44,7 @@ class BaseCallbackHandler:
         
         # 依赖注入
         self.ui_handler: UIHandler = bot_instance.ui_handler
-        self.state_manager: UserStateManager = bot_instance.state_manager
-        self.state_helper: UserStateHelper = bot_instance.state_helper
+       
         
         # 服务依赖
         self.user_service = bot_instance.user_service

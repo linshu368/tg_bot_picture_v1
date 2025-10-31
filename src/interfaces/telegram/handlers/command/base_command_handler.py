@@ -12,7 +12,6 @@ from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 from ...ui_handler import UIHandler, escape_markdown
-from ...user_state_manager import UserStateManager, UserStateHelper
 
 
 def safe_command_handler(func):
@@ -53,8 +52,7 @@ class BaseCommandHandler:
         
         # 核心组件
         self.ui_handler: UIHandler = bot_instance.ui_handler
-        self.state_manager: UserStateManager = bot_instance.state_manager
-        self.state_helper: UserStateHelper = bot_instance.state_helper
+       
         
         # 服务依赖
         self.user_service = bot_instance.user_service
