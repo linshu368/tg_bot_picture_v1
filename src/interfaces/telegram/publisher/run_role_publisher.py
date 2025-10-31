@@ -158,6 +158,51 @@ def parse_channel_username(url_or_username: str) -> str:
         raise ValueError("Private/invite links not supported. Use public username URL like https://t.me/ai_role_list")
     return "@" + first
 
+# 新增的功能：检查角色字段是否有变化
+def needs_publish(role: Dict[str, Any], updated_fields: Dict[str, Any]) -> bool:
+    """检查角色的规定字段是否有变化，如果有变化删除 created_at 字段"""
+    display_fields = ["name", "summary", "tags", "avatar"]
+    return any(field in updated_fields for field in display_fields)
+
+# 新增的功能：更新角色时删除 created_at 字段
+def update_role(roles: List[Dict[str, Any]], role_id: str, updated_fields: Dict[str, Any]) -> None:
+    """更新角色数据并删除 created_at 字段，标记为未发布"""
+    for role in roles:
+        if role.get("role-id") == role_id:
+            role.update(updated_fields)
+            if needs_publish(role, updated_fields):
+                if "created_at" in role:
+                    del role["created_at"]
+            break
+    save_roles(roles)
+
+# 新增的功能：检查和发布角色
+async def check_and_publish_roles(client: TelegramClient, channel: str, roles: List[Dict[str, Any]]) -> None:
+    """检查角色字段变化并发布未发布的角色"""
+    for role in roles:
+        updated_fields = {}  # 存储更新的字段
+        
+        # 检查字段变化
+        if 'name' in role and role['name'] != role.get('original_name'):
+            updated_fields['name'] = role['name']
+        if 'summary' in role and role['summary'] != role.get('original_summary'):
+            updated_fields['summary'] = role['summary']
+        if 'tags' in role and role['tags'] != role.get('original_tags'):
+            updated_fields['tags'] = role['tags']
+        if 'avatar' in role and role['avatar'] != role.get('original_avatar'):
+            updated_fields['avatar'] = role['avatar']
+
+        # 如果有字段变化，删除 created_at 字段并准备重新发布
+        if updated_fields:
+            print(f"检测到角色 '{role.get('name', '未知')}' 字段变化，准备重新发布...")
+            if "created_at" in role:
+                del role["created_at"]
+            save_roles(roles)
+        
+        # 发布未发布的角色
+        if not role.get("created_at"):  # 如果没有 created_at 字段，说明角色未发布
+            await publish_role(client, channel, role, roles)
+            await asyncio.sleep(PUBLISH_INTERVAL_SECONDS)
 
 async def main() -> None:
     assert API_ID and API_HASH and SESSION_STRING, "Missing TG_API_ID/TG_API_HASH/TG_SESSION_STRING"
@@ -190,23 +235,10 @@ async def main() -> None:
                     await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)
                     continue
                 
-                # 2. 筛选未发布的角色
-                unpublished_roles = [role for role in roles if should_publish_role(role)]
-                
-                # 3. 发布处理
-                if unpublished_roles:
-                    print(f"🔍 发现 {len(unpublished_roles)} 个未发布角色: {', '.join([r.get('name', '未知') for r in unpublished_roles])}")
-                    
-                    for role in unpublished_roles:
-                        await publish_role(client, channel, role, roles)
-                        # 发布间隔，避免频控
-                        await asyncio.sleep(PUBLISH_INTERVAL_SECONDS)
-                        
-                    print("✅ 本轮发布完成")
-                else:
-                    print("✅ 所有角色都已发布，无需操作")
-                
-                # 4. 等待下一轮检查
+                # 2. 执行字段变化检查和发布
+                await check_and_publish_roles(client, channel, roles)
+
+                # 3. 等待下一轮检查
                 print(f"⏰ 等待 {CHECK_INTERVAL_MINUTES} 分钟后进行下次检查...")
                 await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)
                 
@@ -214,7 +246,6 @@ async def main() -> None:
                 print(f"❌ 检查循环出错: {e}")
                 print(f"⏰ 等待 {RETRY_INTERVAL_MINUTES} 分钟后重试...")
                 await asyncio.sleep(RETRY_INTERVAL_MINUTES * 60)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

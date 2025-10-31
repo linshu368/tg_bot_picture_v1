@@ -119,15 +119,6 @@ class BotApplication:
             payment_webhook_thread.start()
             self.logger.info(f"🌐 支付回调服务器已启动 (端口{payment_webhook_port})")
             
-            # 启动图片回调服务器（在后台线程中）- 使用动态端口避免冲突
-            image_webhook_thread = threading.Thread(
-                target=self.image_webhook.run,
-                kwargs={'host': '0.0.0.0', 'port': image_webhook_port, 'debug': False},
-                daemon=True
-            )
-            image_webhook_thread.start()
-            self.logger.info(f"🖼️ 图片回调服务器已启动 (端口{image_webhook_port})")
-            
             # 启动Telegram Bot
             await self.telegram_bot.start()
             
@@ -137,7 +128,7 @@ class BotApplication:
             self.logger.info(f"   - 数据库: Supabase ({self.settings.database.supabase_url})")
             self.logger.info(f"   - 管理员ID: {getattr(self.settings.bot, 'admin_user_id', '未设置')}")
             self.logger.info(f"   - 支付回调: http://localhost:{payment_webhook_port}/payment/notify")
-            self.logger.info(f"   - 图片回调: http://localhost:{image_webhook_port}/webhook/image-process")
+           
             
             # 等待停止信号
             await asyncio.Event().wait()

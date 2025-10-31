@@ -1,6 +1,7 @@
 # api.py
 import requests
 import os
+import json
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -19,26 +20,53 @@ class GPTCaller:
             'Content-Type': 'application/json'
         }
 
-    async def get_response(self, messages, model_name=None, timeout=60):
-        # 检查必要的配置
+    def get_stream_response(self, messages, model_name=None, timeout=60):
+        """
+        调用 OpenAI API 流式生成响应 (同步版本，用于测试)
+        """
         if not self.api_key:
             raise ValueError("API密钥未设置，请设置TEXT_OPENAI_API_KEY环境变量")
         
         data = {
             'model': model_name or self.default_model,
-            'messages': messages
+            'messages': messages,
+            'stream': True  # 启用流式返回
         }
 
-        # print(f"🔍 调试信息:")
-        # print(f"   API URL: {self.url}")
-        # print(f"   API Key: {self.api_key[:20]}...")
-        # print(f"   Model: {model_name or self.default_model}")
-        # print(f"   Messages: {messages}")
-
-        response = requests.post(self.url, headers=self.headers, json=data, timeout=timeout)
-        
-        # print(f"🔍 响应状态码: {response.status_code}")
-        # print(f"🔍 响应内容: {response.text}")
-        
-        response.raise_for_status()
-        return response.json()['choices'][0]['message']['content']
+        # 发送请求并开启流式返回
+        with requests.post(self.url, headers=self.headers, json=data, timeout=timeout, stream=True) as response:
+            response.raise_for_status()
+            
+            # 逐块读取流式数据 (OpenAI SSE 格式)
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                    
+                # 解码
+                line_str = line.decode('utf-8')
+                
+                # OpenAI 流式响应格式: "data: {...}"
+                if line_str.startswith('data: '):
+                    data_str = line_str[6:]  # 去掉 "data: " 前缀
+                    
+                    # 结束标志
+                    if data_str == '[DONE]':
+                        break
+                    
+                    try:
+                        chunk_json = json.loads(data_str)
+                        choices = chunk_json.get('choices', [])
+                        
+                        # 检查 choices 是否为空
+                        if not choices:
+                            continue
+                            
+                        delta = choices[0].get('delta', {})
+                        content = delta.get('content')
+                        
+                        # 只返回有内容的部分
+                        if content:
+                            yield content
+                    except (json.JSONDecodeError, IndexError, KeyError) as e:
+                        # 忽略解析错误，继续处理下一行
+                        continue

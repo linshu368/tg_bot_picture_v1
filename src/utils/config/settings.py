@@ -43,14 +43,6 @@ class DatabaseSettings:
     pool_size: int = 5
     timeout: int = 30
 
-
-@dataclass
-class ApiSettings:
-    """外部API配置"""
-    clothoff_api_url: str
-    clothoff_video_api_url: str
-    clothoff_api_key: str
-    clothoff_webhook_base_url: str
     
 
 @dataclass
@@ -69,60 +61,21 @@ class CreditSettings:
     """积分系统配置"""
     default_credits: int = 30
     daily_signin_reward: int = 4
-    cost_image_generation: int = 5
-    cost_video_generation: int = 10
-    cost_faceswap_photo: int = 8
-    cost_faceswap_video: int = 15
-    cost_quick_undress: int = 10
-    cost_custom_undress: int = 10
-
+   
 
 class ServicesSettings:
-    """服务配置
-    
-    🔧 V2迁移：支持服务迁移的配置控制
+    """
+    服务配置
     """
     
     def __init__(self, config_dict: Dict[str, Any] = None):
         config_dict = config_dict or {}
-        
-        # 🔧 ActionRecordService迁移模式配置
-        # stable: 稳定模式，使用旧Repository
-        # parallel_test: 并行测试模式，主用旧Repository，验证新Repository  
-        # migrated: 迁移完成，使用新Repository
-        self.action_record_migration_mode = config_dict.get('action_record_migration_mode', 'stable')
-        
-        # 🔧 SessionService迁移模式配置
-        # stable: 稳定模式，使用旧Repository (分离的session_repo + session_record_repo)
-        # parallel_test: 并行测试模式，主用旧Repository，验证新SessionCompositeRepository  
-        # migrated: 迁移完成，使用新SessionCompositeRepository
-        self.session_service_migration_mode = config_dict.get('session_service_migration_mode', 'stable')
-        
-        # 🔧 ImageService迁移模式配置
-        # stable: 稳定模式，使用ImageTaskRepository，积分在外部处理
-        # parallel_test: 并行测试模式，主用ImageTaskRepository，验证PointCompositeRepository
-        # migrated: 迁移完成，create_image_task使用PointCompositeRepository
-        self.image_service_migration_mode = config_dict.get('image_service_migration_mode', 'stable')
-        
-        # 🔧 PaymentService迁移模式配置
-        # stable: 稳定模式，使用PaymentOrderRepository，积分通过UserService处理
-        # parallel_test: 并行测试模式，主用PaymentOrderRepository，验证PointCompositeRepository
-        # migrated: 迁移完成，支付成功处理使用PointCompositeRepository
-        self.payment_service_migration_mode = config_dict.get('payment_service_migration_mode', 'stable')
-        
-        # 🔧 UserService迁移模式配置
-        # stable: 稳定模式，使用分离的user_repo + point_repo + daily_checkin_repo
-        # parallel_test: 并行测试模式，主用旧Repository，验证UserCompositeRepository
-        # migrated: 迁移完成，使用UserCompositeRepository + PointCompositeRepository
-        self.user_service_migration_mode = config_dict.get('user_service_migration_mode', 'stable')
-
-
+       
 @dataclass
 class AppSettings:
     """应用主配置"""
     bot: BotSettings
     database: DatabaseSettings
-    api: ApiSettings
     payment: PaymentSettings
     credit: CreditSettings
     services: ServicesSettings  # 🔧 V2迁移：添加服务配置
@@ -134,7 +87,6 @@ class AppSettings:
     # 其他配置
     max_queue_size: int = 100
     rate_limit_seconds: int = 30
-    image_processing_timeout: int = 300
 
 
 def get_settings() -> AppSettings:
@@ -156,20 +108,11 @@ def get_settings() -> AppSettings:
         timeout=int(os.getenv("DATABASE_TIMEOUT", "30"))
     )
     
-    # API配置
-    api_config = ApiSettings(
-        clothoff_api_url=os.getenv("CLOTHOFF_API_URL", "https://public-api.clothoff.net/undress"),
-        clothoff_video_api_url=os.getenv("CLOTHOFF_VIDEO_API_URL", "https://pub-api.clothoff.net/api/videoGenerations/animate"),
-        clothoff_api_key=os.getenv("CLOTHOFF_API_KEY", "d1eda76ff2c9f5c7f3827f82f76479ff339f7526"),
-        clothoff_webhook_base_url=os.getenv("CLOTHOFF_WEBHOOK_BASE_URL", "http://108.61.188.236")
-    )
-    
+   
     # 积分配置
     credit_config = CreditSettings(
         default_credits=int(os.getenv("DEFAULT_CREDITS", "50")),
-        daily_signin_reward=int(os.getenv("DAILY_SIGNIN_REWARD", "10")),
-        cost_image_generation=int(os.getenv("COST_IMAGE_GENERATION", "15")),
-        cost_video_generation=int(os.getenv("COST_VIDEO_GENERATION", "20"))
+        daily_signin_reward=int(os.getenv("DAILY_SIGNIN_REWARD", "10"))
     )
     
     # 支付配置
@@ -182,22 +125,13 @@ def get_settings() -> AppSettings:
         return_url=os.getenv("PAYMENT_RETURN_URL", "")
     )
     
-    # 🔧 V2迁移：服务配置
-    services_config = ServicesSettings({
-        'action_record_migration_mode': os.getenv("ACTION_RECORD_MIGRATION_MODE", "stable"),
-        'session_service_migration_mode': os.getenv("SESSION_SERVICE_MIGRATION_MODE", "stable"),
-        'image_service_migration_mode': os.getenv("IMAGE_SERVICE_MIGRATION_MODE", "stable"),
-        'payment_service_migration_mode': os.getenv("PAYMENT_SERVICE_MIGRATION_MODE", "stable"),
-        'user_service_migration_mode': os.getenv("USER_SERVICE_MIGRATION_MODE", "stable")
-    })
+  
     
     return AppSettings(
         bot=bot_config,
         database=database_config,
-        api=api_config,
         credit=credit_config,
-        payment=payment_config,
-        services=services_config  # 🔧 V2迁移：添加服务配置
+        payment=payment_config
     ) 
 
 
