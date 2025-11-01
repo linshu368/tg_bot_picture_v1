@@ -11,11 +11,11 @@ from telethon.sessions import StringSession
 from dotenv import load_dotenv
 
 
-env_path = Path(__file__).resolve().parents[4] / ".env"
+env_path = Path(__file__).resolve().parents[2] / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
-ROLE_LIBRARY_PATH = os.environ.get("ROLE_LIBRARY_PATH", str(Path(__file__).resolve().parents[4] / "demo" / "role_library.json"))
+ROLE_LIBRARY_PATH = os.environ.get("ROLE_LIBRARY_PATH", str(Path(__file__).resolve().parents[2] / "demo" / "role_library.json"))
 ROLE_CHANNEL_URL = os.environ.get("ROLE_CHANNEL_URL", "")
 API_ID = int(os.environ.get("TG_API_ID", "0"))
 API_HASH = os.environ.get("TG_API_HASH", "")
