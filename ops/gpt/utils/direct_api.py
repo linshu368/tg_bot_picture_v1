@@ -50,8 +50,12 @@ class gptCaller:
 
         try:
             # 发送 POST 请求，添加超时设置
-            response = requests.post(self.url, headers=self.headers, json=data, timeout=timeout)
+            # response = requests.post(self.url, headers=self.headers, json=data, timeout=timeout)
 
+             # 发送 POST 请求，添加超时设置，禁用代理以避免连接问题
+            proxies = {'http': None, 'https': None}  # 禁用代理
+            response = requests.post(self.url, headers=self.headers, json=data, timeout=timeout, proxies=proxies)
+            
             # 检查请求是否成功
             if response.status_code == 200:
                 return response.json().get('choices')[0].get('message').get('content')
