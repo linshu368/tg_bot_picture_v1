@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 class RoleService:
-    def __init__(self, role_file: str = "demo/role_library.json"):
+    def __init__(self, role_file: str = "scripts/publisher/role_library.json"):
         self.role_file = Path(role_file)
         if not self.role_file.exists():
             raise FileNotFoundError(f"角色库文件未找到: {self.role_file}")

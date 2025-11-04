@@ -15,14 +15,34 @@ env_path = Path(__file__).resolve().parents[2] / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
-ROLE_LIBRARY_PATH = os.environ.get("ROLE_LIBRARY_PATH", str(Path(__file__).resolve().parents[2] / "demo" / "role_library.json"))
+ROLE_LIBRARY_PATH = os.environ.get("ROLE_LIBRARY_PATH", str(Path(__file__).resolve().parent / "role_library.json"))
 ROLE_CHANNEL_URL = os.environ.get("ROLE_CHANNEL_URL", "")
 API_ID = int(os.environ.get("TG_API_ID", "0"))
 API_HASH = os.environ.get("TG_API_HASH", "")
 SESSION_STRING = os.environ.get("TG_SESSION_STRING", "")
-PROXY_HOST = os.environ.get("TG_PROXY_HOST", "")
-PROXY_PORT = int(os.environ.get("TG_PROXY_PORT", "0")) if os.environ.get("TG_PROXY_PORT") else None
-PROXY_TYPE = os.environ.get("TG_PROXY_TYPE", "socks5")  # socks5, socks4, http
+
+# 代理配置格式: PROXY = ('socks5', '127.0.0.1', 1080)
+PROXY_RAW = os.environ.get("PROXY", "")
+if PROXY_RAW:
+    import ast
+    try:
+        proxy_tuple = ast.literal_eval(PROXY_RAW)
+        if isinstance(proxy_tuple, tuple) and len(proxy_tuple) == 3:
+            PROXY_TYPE = proxy_tuple[0]
+            PROXY_HOST = proxy_tuple[1]
+            PROXY_PORT = proxy_tuple[2]
+        else:
+            raise ValueError("PROXY format should be ('type', 'host', port)")
+    except Exception as e:
+        print(f"❌ 解析 PROXY 配置失败: {e}")
+        PROXY_HOST = ""
+        PROXY_PORT = None
+        PROXY_TYPE = "socks5"
+else:
+    PROXY_HOST = ""
+    PROXY_PORT = None
+    PROXY_TYPE = "socks5"
+
 CHECK_INTERVAL_MINUTES = float(os.environ.get("CHECK_INTERVAL_MINUTES", "15"))
 PUBLISH_INTERVAL_SECONDS = int(os.environ.get("PUBLISH_INTERVAL_SECONDS", "30"))
 RETRY_INTERVAL_MINUTES = float(os.environ.get("RETRY_INTERVAL_MINUTES", "5"))

@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -38,6 +39,10 @@ class TextBot:
         self.ui_handler = UIHandler()
         self.role_service = RoleService()
         self.default_role_id = "1" #默认角色ID
+        # 从环境变量读取角色频道URL，根据MODE选择默认值
+        mode = os.getenv("MODE", "staging")
+        default_role_url = "https://t.me/ai_role_list" if mode == "production" else "https://t.me/ai_role_list_test"
+        self.role_channel_url = os.getenv("ROLE_CHANNEL_URL", default_role_url)
         # ✅ 最小占位依赖，避免 BaseCallbackHandler 报错
         self.state_manager = DummyService()
         self.state_helper = DummyService()
@@ -184,7 +189,7 @@ class TextBot:
             # 1. 发送通用欢迎语（带底部主菜单和角色图鉴按钮）
             main_menu = self.ui_handler.create_main_menu_keyboard()
             role_gallery_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📚 浏览角色图鉴", url="https://t.me/ai_role_list")]
+                [InlineKeyboardButton("📚 浏览角色图鉴", url=self.role_channel_url)]
             ])
             await update.message.reply_text(
                 """让AI为你提供理想陪伴：
@@ -474,7 +479,7 @@ class TextBot:
         
         # 创建内联键盘，带URL按钮
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📚 浏览角色图鉴", url="https://t.me/ai_role_list")]
+            [InlineKeyboardButton("📚 浏览角色图鉴", url=self.role_channel_url)]
         ])
         
         await update.message.reply_text(role_text, reply_markup=keyboard, parse_mode='Markdown')
