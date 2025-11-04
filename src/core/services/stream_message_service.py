@@ -221,7 +221,7 @@ class StreamMessageService:
         # 兜底机制：如果会话没有角色ID，设置默认角色
         if not current_role_id:
             self.logger.warning(f"⚠️ 会话无角色ID，触发兜底机制: user_id={user_id}, session_id={session_id}")
-            default_role_id = '1'
+            default_role_id = '4'
             await session_service.set_session_role_id(session_id, default_role_id)
             current_role_id = default_role_id
         
@@ -230,7 +230,7 @@ class StreamMessageService:
         if not role_data:
             # 二次降级：角色ID对应的角色不存在
             self.logger.warning(f"⚠️ 角色不存在: role_id={current_role_id}，降级到默认角色")
-            default_role_id = '1'
+            default_role_id = '4'
             role_data = role_service.get_role_by_id(default_role_id)
             if role_data:
                 await session_service.set_session_role_id(session_id, default_role_id)

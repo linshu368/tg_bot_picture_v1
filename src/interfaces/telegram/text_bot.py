@@ -38,7 +38,7 @@ class TextBot:
         self._application: Optional[Application] = None
         self.ui_handler = UIHandler()
         self.role_service = RoleService()
-        self.default_role_id = "1" #默认角色ID
+        self.default_role_id = "4" #默认角色ID
         # 从环境变量读取角色频道URL，根据MODE选择默认值
         mode = os.getenv("MODE", "staging")
         default_role_url = "https://t.me/ai_role_list" if mode == "production" else "https://t.me/ai_role_list_test"
@@ -216,8 +216,26 @@ class TextBot:
             # 3. 获取默认角色数据
             role = self.role_service.get_role_by_id(self.default_role_id)
             
-            # 4. 发送默认角色预置消息
+            # 4. 发送默认角色卡预览（如果有post_link）
             if role:
+                post_link = role.get("post_link")
+                if post_link:
+                    try:
+                        # 发送角色卡预览
+                        await update.message.reply_text(
+                            f"<a href=\"{post_link}\">回到角色卡频道</a>",
+                            parse_mode="HTML",
+                            disable_web_page_preview=False
+                        )
+                    except Exception as e:
+                        self.logger.error(f"❌ 发送默认角色卡预览失败: {e}")
+                        # 降级方案：直接发送链接
+                        await update.message.reply_text(
+                            post_link,
+                            disable_web_page_preview=False
+                        )
+                
+                # 5. 发送默认角色预置消息
                 await update.message.reply_text(role["predefined_messages"])
             else:
                 await update.message.reply_text("❌ 默认角色不存在")

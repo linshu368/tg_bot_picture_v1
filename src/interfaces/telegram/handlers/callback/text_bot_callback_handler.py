@@ -73,7 +73,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 
             if not role_data:
                 # 降级到默认角色 (从bot实例获取默认角色ID)
-                default_role_id = getattr(self.bot, 'default_role_id', '001')
+                default_role_id = getattr(self.bot, 'default_role_id', '4')
                 role_data = role_service.get_role_by_id(default_role_id)
                 self.logger.warning(f"⚠️ 角色不存在，使用默认角色: role_id={role_id} -> default={default_role_id}")
             
@@ -120,7 +120,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             current_role_id = await session_service.get_session_role_id(current_session_id)
             if not current_role_id:
                 # 如果当前会话没有角色，使用默认角色
-                current_role_id = getattr(self.bot, 'default_role_id', '001')
+                current_role_id = getattr(self.bot, 'default_role_id', '4')
                 self.logger.info(f"📥 当前会话无角色，使用默认角色: {current_role_id}")
             
             # 2. 创建新会话，保持相同角色
@@ -232,7 +232,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 await query.answer("❌ 快照不存在或无权访问")
                 return
 
-            role_id = snap.get("role_id") or getattr(self.bot, 'default_role_id', '1')
+            role_id = snap.get("role_id") or getattr(self.bot, 'default_role_id', '4')
 
             # 2) 创建新会话并绑定角色
             new_session = await session_service.new_session(user_id, role_id)
