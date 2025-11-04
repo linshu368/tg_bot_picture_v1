@@ -149,5 +149,6 @@ class AICompletionPort:
 
 
 # ✅ 全局唯一实例 - 与其他服务保持一致的设计模式
-from demo.api_async import AsyncGPTCaller
-ai_completion_port = AICompletionPort(AsyncGPTCaller())
+
+from demo.novel_async import AsyncNovelCaller
+ai_completion_port = AICompletionPort(AsyncNovelCaller())

@@ -4,8 +4,8 @@
 import json
 from pathlib import Path
 
-# 读取角色库
-role_library_path = Path(__file__).parent / "role_library.json"
+# 读取角色库 - 文件位于 scripts/publisher/ 目录
+role_library_path = Path(__file__).parent.parent / "scripts" / "publisher" / "role_library.json"
 with open(role_library_path, 'r', encoding='utf-8') as f:
     roles = json.load(f)
 

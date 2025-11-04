@@ -140,8 +140,15 @@ class StreamMessageService:
                 await initial_msg.edit_text("❌ 生成回复失败，请重试")
                 
         except Exception as e:
-            self.logger.error(f"流式生成过程失败: {e}")
-            await initial_msg.edit_text(f"❌ 生成失败: {str(e)}")
+            # 详细记录错误信息
+            import traceback
+            error_details = f"类型: {type(e).__name__}, 消息: {str(e)}"
+            self.logger.error(f"流式生成过程失败 - {error_details}")
+            self.logger.error(f"完整堆栈:\n{traceback.format_exc()}")
+            
+            # 向用户显示更详细的错误信息
+            error_msg = str(e) if str(e) else f"{type(e).__name__} (无详细信息)"
+            await initial_msg.edit_text(f"❌ 生成失败: {error_msg}")
 
     async def _process_chunk_with_granular_control(self, chunk, accumulated_text_ref, phase_ref, 
                                                  first_chars_threshold, regular_update_interval, 
