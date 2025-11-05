@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -63,6 +63,26 @@ class TextBot:
         self.callback_handler = TextBotCallbackHandler(self)
         # 用于保存快照命名的临时状态：user_id -> {session_id}
         self.pending_snapshot = {}
+    
+    def _get_role_predefined_message(self, role: Dict[str, Any]) -> str:
+        """
+        从角色数据中提取预置消息
+        
+        Args:
+            role: 角色数据字典
+            
+        Returns:
+            预置消息内容，如果不存在则返回默认消息
+        """
+        # 从 history 字段的第一条消息获取预置对话
+        history = role.get("history", [])
+        if history and len(history) > 0:
+            first_message = history[0]
+            if isinstance(first_message, dict) and first_message.get("role") == "assistant":
+                return first_message.get("content", "你好！")
+        
+        # 降级兜底
+        return "你好！"
         
     # ------------------------
     # Public APIs
@@ -180,17 +200,19 @@ class TextBot:
                     )
                 
                 # 5. 发送角色预置消息
-                await update.message.reply_text(role["predefined_messages"])
+                predefined_msg = self._get_role_predefined_message(role)
+                await update.message.reply_text(predefined_msg)
             else:
                 # 角色不存在，降级到默认角色
                 self.logger.warning(f"⚠️ 角色不存在: role_id={role_id}，使用默认角色")
                 await update.message.reply_text(f"❌ 角色不存在，使用默认角色")
                 
                 # 使用默认角色创建会话
-                session = await session_service.new_session(user_id, self.default_role_id)
+                session = await self.session_service.new_session(user_id, self.default_role_id)
                 role = self.role_service.get_role_by_id(self.default_role_id)
                 if role:
-                    await update.message.reply_text(role["predefined_messages"])
+                    predefined_msg = self._get_role_predefined_message(role)
+                    await update.message.reply_text(predefined_msg)
         
         # 情况A：正常启动（无参数），使用默认角色
         else:
@@ -246,7 +268,8 @@ class TextBot:
                         )
                 
                 # 5. 发送默认角色预置消息
-                await update.message.reply_text(role["predefined_messages"])
+                predefined_msg = self._get_role_predefined_message(role)
+                await update.message.reply_text(predefined_msg)
             else:
                 await update.message.reply_text("❌ 默认角色不存在")
 

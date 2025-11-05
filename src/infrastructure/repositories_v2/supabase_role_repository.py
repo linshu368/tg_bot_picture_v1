@@ -13,7 +13,9 @@ class SupabaseRoleRepository:
     
     数据表：role_library
     字段：role_id, name, avatar, tags, summary, system_prompt, 
-          history, predefined_messages, model, deeplink, created_at, post_link
+          history, model, deeplink, created_at, post_link
+    
+    注意：history 字段包含预置对话，格式为：[{"role": "assistant", "content": "预置对话内容"}]
     """
     
     def __init__(self, supabase_manager):

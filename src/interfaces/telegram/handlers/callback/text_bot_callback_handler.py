@@ -40,6 +40,26 @@ class TextBotCallbackHandler(BaseCallbackHandler):
     # -------------------------
     # 工具方法
     # -------------------------
+    def _get_role_predefined_message(self, role: dict) -> str:
+        """
+        从角色数据中提取预置消息
+        
+        Args:
+            role: 角色数据字典
+            
+        Returns:
+            预置消息内容，如果不存在则返回默认消息
+        """
+        # 从 history 字段的第一条消息获取预置对话
+        history = role.get("history", [])
+        if history and len(history) > 0:
+            first_message = history[0]
+            if isinstance(first_message, dict) and first_message.get("role") == "assistant":
+                return first_message.get("content", "你好！")
+        
+        # 降级兜底
+        return "你好！"
+    
     async def _update_message(self, query, reply_text: str, session_id: str = "", user_message_id: str = ""):
         await query.edit_message_text(
             text=reply_text,
@@ -138,7 +158,9 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             # 3. 获取角色信息，发送角色欢迎语
             role_data = self.role_service.get_role_by_id(current_role_id)
             if role_data:
-                welcome_msg = f"🆕 已开启新对话\n\n💫 当前角色：{role_data.get('name', '未知角色')}\n\n{role_data.get('predefined_messages', '你好！')}"
+                # 从 history 字段的第一条消息获取预置对话
+                predefined_msg = self._get_role_predefined_message(role_data)
+                welcome_msg = f"🆕 已开启新对话\n\n💫 当前角色：{role_data.get('name', '未知角色')}\n\n{predefined_msg}"
             else:
                 welcome_msg = "🆕 已开启新对话"
             
