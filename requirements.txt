@@ -4,26 +4,26 @@ uvicorn==0.36.0
 
 # ---- 异步与网络 ----
 # aiofiles==23.2.0  # 异步文件操作 - 主要用于图片文件处理
-aiohttp>=3.10.0,<3.12  # 保持你的版本范围，更灵活
+aiohttp==3.11.18
 asyncpg==0.29.0
-httpx==0.25.2   # 与 supabase / openai / postgrest 均兼容
+httpx==0.28.1   # 与 supabase / openai / postgrest 均兼容
 httpcore==1.0.9
 sniffio==1.3.1
 anyio==4.11.0
 async-timeout==4.0.3
 
 # ---- 数据结构与配置 ----
-pydantic==2.5.0
+pydantic==2.12.3
 pydantic-settings==2.2.1
 python-dotenv==1.0.0
 attrs==25.3.0
 
 # ---- Supabase SDK ----
-supabase==2.3.4
-gotrue==2.9.1
-postgrest==0.15.1
-realtime==1.0.6
-# storage3==0.7.7  # Supabase存储服务 - 主要用于存储处理后的图片
+supabase==2.23.2
+gotrue==2.12.4
+postgrest==2.23.2
+realtime==2.23.2
+storage3==2.23.2  # Supabase存储服务 - 主要用于存储处理后的图片
 supafunc==0.3.3
 
 # ---- OpenAI SDK ----
@@ -57,6 +57,6 @@ PyYAML==6.0.2
 typing_extensions==4.15.0
 
 # ---- Telegram Bot ----
-python-telegram-bot==20.7
-Telethon>=1.34,<2.0
-PySocks>=1.7.1
+python-telegram-bot==22.5
+Telethon==1.41.2
+PySocks==1.7.1
