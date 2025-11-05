@@ -20,11 +20,12 @@ attrs==25.3.0
 
 # ---- Supabase SDK ----
 supabase==2.23.2
-gotrue==2.12.4
-postgrest==2.23.2
-realtime==2.23.2
-storage3==2.23.2  # Supabase存储服务 - 主要用于存储处理后的图片
-supafunc==0.3.3
+# 以下包由 supabase 自动管理依赖，无需显式指定版本
+# gotrue==2.12.4
+# postgrest==2.23.2
+# realtime==2.23.2
+# storage3==2.23.2
+# supafunc 会由 supabase 自动安装兼容版本
 
 # ---- OpenAI SDK ----
 openai==1.40.6
