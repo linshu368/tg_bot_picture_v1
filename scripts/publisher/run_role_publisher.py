@@ -114,7 +114,7 @@ def build_caption(role: Dict[str, Any]) -> str:
     caption = (
         f"#{name}\n\n"
         f"{summary}\n\n"
-        f"[🚀 启动酒馆AI]({deeplink})\n\n"
+        f"[🍬 启动蜜镜AI]({deeplink})\n\n"
         f"{tag_line}"
     )
     return caption

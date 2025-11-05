@@ -47,12 +47,11 @@ class SnapshotService:
             except Exception:
                 role_history = []
 
-        # 3. 生成展示名称：{YYYYMMDD_HHMMSS}_{用户命名或未命名}_{角色名-简介}
-        ts = datetime.now().strftime("%Y%m%d")
+        # 3. 生成展示名称：{YYYYMMDD_HHMMSS}_{用户命名或未命名}_{角色名}
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_title = (user_title or "").strip() or "未命名"
         role_name = (role_data.get("name") if role_data else "未知角色") or "未知角色"
-        role_summary = (role_data.get("summary") if role_data else "") or ""
-        display_name = f"{ts}_{safe_title}_{role_name}-{role_summary}" if role_summary else f"{ts}_{safe_title}_{role_name}"
+        display_name = f"{ts}_{safe_title}_{role_name}"
 
         # 4. 生成快照并写入
         snapshot_id = uuid.uuid4().hex

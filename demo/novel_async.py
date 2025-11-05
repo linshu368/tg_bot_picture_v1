@@ -126,60 +126,14 @@ class AsyncNovelCaller:
         debug: bool = False,
     ) -> str:
         """
-        非流式：优先尝试 stream=False 的一次性响应；不兼容时回退为聚合流式。
+        非流式：直接聚合流式结果
         """
-        model = model_name or self.default_model
-        url = self.base_url.rstrip('/') + '/chat/completions'
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-
-        body = {
-            "model": model,
-            "messages": messages,
-            "stream": False,
-            "temperature": 0.7,
-            "max_tokens": 800,
-            "top_p": 0.35,
-            "repetition_penalty": 1.05,
-        }
-
         if debug:
-            print(f"[Novel API] 发起非流式请求到: {url}")
-
-        timeout_cfg = aiohttp.ClientTimeout(total=timeout)
-        try:
-            async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
-                async with session.post(url, headers=headers, json=body) as resp:
-                    text = await resp.text()
-                    if resp.status != 200:
-                        if debug:
-                            print(f"[Novel API] 非200响应: {resp.status}, 内容: {text[:200]}")
-                        raise ValueError(f"Error code: {resp.status} - {text}")
-
-                    # 兼容不同返回结构
-                    try:
-                        data = json.loads(text)
-                        if data.get('choices'):
-                            # OpenAI风格
-                            first = data['choices'][0]
-                            # 兼容 message.content 或 delta.content
-                            if 'message' in first and first['message']:
-                                return first['message'].get('content', '') or ''
-                            delta = first.get('delta') or {}
-                            return delta.get('content', '') or ''
-                    except json.JSONDecodeError:
-                        pass
-
-                    # 无法解析结构，直接返回原文本
-                    return text or ''
-        except Exception:
-            # 回退为聚合流式
-            chunks = []
-            async for part in self.get_stream_response(messages, model_name=model, timeout=timeout, debug=debug):
-                chunks.append(part)
-            return ''.join(chunks)
+            print(f"[Novel API] 使用流式聚合模式获取完整响应")
+        
+        chunks = []
+        async for part in self.get_stream_response(messages, model_name=model_name, timeout=timeout, debug=debug):
+            chunks.append(part)
+        return ''.join(chunks)
 
 
