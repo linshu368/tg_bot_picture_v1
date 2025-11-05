@@ -48,6 +48,38 @@ class Container:
         return name in self._singletons or name in self._factories
 
 
+def initialize_global_services(container: Container):
+    """
+    初始化全局服务实例
+    将容器创建的实例注入到全局变量中，确保向后兼容
+    
+    Args:
+        container: 已配置好的容器实例
+    """
+    # 导入模块并替换全局实例
+    # 注意：必须直接导入模块文件，不能从 __init__.py 导入
+    import sys
+    import importlib
+    
+    # 确保直接从模块文件导入
+    session_service_module = importlib.import_module("src.domain.services.session_service_base")
+    role_service_module = importlib.import_module("src.domain.services.role_service")
+    snapshot_service_module = importlib.import_module("src.domain.services.snapshot_service")
+    stream_message_service_module = importlib.import_module("src.core.services.stream_message_service")
+    message_service_module = importlib.import_module("src.domain.services.message_service")
+    ai_completion_port_module = importlib.import_module("src.domain.services.ai_completion_port")
+    
+    # 替换全局实例
+    session_service_module.session_service = container.get("session_service")
+    role_service_module.role_service = container.get("role_service")
+    snapshot_service_module.snapshot_service = container.get("snapshot_service")
+    stream_message_service_module.stream_message_service = container.get("stream_message_service")
+    message_service_module.message_service = container.get("message_service")
+    ai_completion_port_module.ai_completion_port = container.get("ai_completion_port")
+    
+    logging.getLogger(__name__).info("✅ 全局服务实例已初始化（包含message_service和ai_completion_port）")
+
+
 def setup_container(settings) -> Container:
     """设置依赖注入容器"""
     container = Container()
@@ -57,12 +89,75 @@ def setup_container(settings) -> Container:
     
     # 注册数据库相关 - 支持Supabase (注册为单例确保实例唯一性)
     def supabase_manager_factory(c):
-        from src.infrastructure.database.supabase_manager import SupabaseManager
+        from src.infrastructure.repositories_v2.supabase_manager import SupabaseManager
         return SupabaseManager(c.get("settings").database)
     
     container.register_factory("supabase_manager", supabase_manager_factory)
     
-
+    # 注册 Repository 层
+    def role_repository_factory(c):
+        from src.infrastructure.repositories_v2.supabase_role_repository import SupabaseRoleRepository
+        return SupabaseRoleRepository(c.get("supabase_manager"))
+    
+    container.register_factory("role_repository", role_repository_factory)
+    
+    def snapshot_repository_factory(c):
+        from src.infrastructure.repositories_v2.supabase_snapshot_repository import SupabaseSnapshotRepository
+        return SupabaseSnapshotRepository(c.get("supabase_manager"))
+    
+    container.register_factory("snapshot_repository", snapshot_repository_factory)
+    
+    # 注册 Service 层
+    def session_service_factory(c):
+        from src.domain.services.session_service_base import SessionService
+        return SessionService()
+    
+    container.register_factory("session_service", session_service_factory)
+    
+    def role_service_factory(c):
+        from src.domain.services.role_service import RoleService
+        return RoleService(c.get("role_repository"))
+    
+    container.register_factory("role_service", role_service_factory)
+    
+    def snapshot_service_factory(c):
+        from src.domain.services.snapshot_service import SnapshotService
+        return SnapshotService(
+            snapshot_repository=c.get("snapshot_repository"),
+            message_service=c.get("message_service"),
+            session_service=c.get("session_service"),
+            role_service=c.get("role_service")
+        )
+    
+    container.register_factory("snapshot_service", snapshot_service_factory)
+    
+    # 注册应用核心服务
+    def stream_message_service_factory(c):
+        from src.core.services.stream_message_service import StreamMessageService
+        return StreamMessageService(role_service=c.get("role_service"))
+    
+    container.register_factory("stream_message_service", stream_message_service_factory)
+    
+    # 注册消息服务
+    def message_service_factory(c):
+        from src.domain.services.message_service import MessageService
+        return MessageService()
+    
+    container.register_factory("message_service", message_service_factory)
+    
+    # 注册GPT调用器
+    def gpt_caller_factory(c):
+        from demo.novel_async import AsyncNovelCaller
+        return AsyncNovelCaller()
+    
+    container.register_factory("gpt_caller", gpt_caller_factory)
+    
+    # 注册AI完成端口服务
+    def ai_completion_port_factory(c):
+        from src.domain.services.ai_completion_port import AICompletionPort
+        return AICompletionPort(c.get("gpt_caller"))
+    
+    container.register_factory("ai_completion_port", ai_completion_port_factory)
     
     def payment_api_factory(c):
         from src.infrastructure.external_apis.payment_api import PaymentAPI
@@ -94,4 +189,6 @@ def setup_container(settings) -> Container:
         )
     
     container.register_factory("payment_webhook_handler", payment_webhook_handler_factory)
-   
+    
+    # 返回配置好的容器
+    return container

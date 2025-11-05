@@ -31,10 +31,6 @@ class BotSettings:
 @dataclass 
 class DatabaseSettings:
     """数据库配置 - 迁移到Supabase"""
-    # SQLite配置（保留作为备份）
-    # path: str = "data/telegram_bot.db"
-    # pool_size: int = 5
-    # timeout: int = 30
     
     # Supabase配置
     supabase_url: str
@@ -125,13 +121,15 @@ def get_settings() -> AppSettings:
         return_url=os.getenv("PAYMENT_RETURN_URL", "")
     )
     
-  
+    # 服务配置（目前为空，未来可扩展）
+    services_config = ServicesSettings({})
     
     return AppSettings(
         bot=bot_config,
         database=database_config,
         credit=credit_config,
-        payment=payment_config
+        payment=payment_config,
+        services=services_config
     ) 
 
 

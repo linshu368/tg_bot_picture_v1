@@ -1,36 +1,53 @@
+"""
+快照服务
+负责会话快照的保存、查询和管理
+"""
+
 import uuid
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from src.domain.services.message_service import message_service
-from src.domain.services.session_service_base import session_service
-from src.domain.services.role_service import role_service
-from src.infrastructure.repositories_v2.snapshot_repository_v2 import SnapshotRepositoryV2
-
 
 class SnapshotService:
-    """MVP 快照服务：保存当前会话上下文到本地 JSON 文件。
-
-    约束：
-    - 仅保存静态快照，不支持编辑/删除/合并
-    - name 为空时，自动生成：{角色名或'对话'}_{YYYYMMDD_HHMMSS}
-    - model/system_prompt 优先取自会话绑定的角色
+    """
+    快照服务 - 基于 Supabase Repository
+    
+    功能：
+    - 保存当前会话上下文为快照
+    - 查询用户的快照列表
+    - 删除快照
+    - 获取特定快照
     """
 
-    def __init__(self):
-        self.repo = SnapshotRepositoryV2()
+    def __init__(self, snapshot_repository, message_service=None, session_service=None, role_service=None):
+        """
+        初始化快照服务
+        
+        Args:
+            snapshot_repository: 快照仓库实例（SupabaseSnapshotRepository）
+            message_service: 消息服务实例（通过容器注入）
+            session_service: 会话服务实例（通过容器注入）
+            role_service: 角色服务实例（通过容器注入）
+        """
+        self.logger = logging.getLogger(__name__)
+        self.repository = snapshot_repository
+        self.message_service = message_service
+        self.session_service = session_service
+        self.role_service = role_service
+        self.logger.info("✅ SnapshotService 初始化完成")
 
     async def save_snapshot(self, user_id: str, session_id: str, user_title: Optional[str] = None) -> str:
         # 1. 读取会话历史（实际交互内容）
-        history = message_service.get_history(session_id) or []
+        history = self.message_service.get_history(session_id) or []
         session_messages: List[Dict[str, str]] = [
             {"role": m.get("role", ""), "content": m.get("content", "")}
             for m in history
         ]
 
         # 2. 获取会话角色 → 角色配置（用于 model/system_prompt 与命名）
-        role_id = await session_service.get_session_role_id(session_id)
-        role_data: Optional[Dict[str, Any]] = role_service.get_role_by_id(role_id) if role_id else None
+        role_id = await self.session_service.get_session_role_id(session_id)
+        role_data: Optional[Dict[str, Any]] = self.role_service.get_role_by_id(role_id) if role_id else None
 
         model = role_data.get("model") if role_data else ""
         system_prompt = role_data.get("system_prompt") if role_data else ""
@@ -67,11 +84,20 @@ class SnapshotService:
             "created_at": datetime.utcnow().isoformat(),
         }
 
-        self.repo.insert(snapshot)
+        self.repository.insert(snapshot)
         return snapshot_id
 
     async def list_snapshots(self, user_id: str) -> List[Dict[str, Any]]:
-        items = self.repo.list_by_user(user_id)
+        """
+        获取用户的所有快照列表
+        
+        Args:
+            user_id: 用户ID
+            
+        Returns:
+            快照列表，按创建时间倒序
+        """
+        items = self.repository.list_by_user(user_id)
         # 倒序：最新在前
         try:
             return sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
@@ -79,13 +105,35 @@ class SnapshotService:
             return items
 
     async def delete_snapshot(self, user_id: str, snapshot_id: str) -> bool:
-        return self.repo.delete(user_id=user_id, snapshot_id=snapshot_id)
+        """
+        删除快照
+        
+        Args:
+            user_id: 用户ID
+            snapshot_id: 快照ID
+            
+        Returns:
+            是否删除成功
+        """
+        return self.repository.delete(user_id=user_id, snapshot_id=snapshot_id)
 
     async def get_snapshot(self, user_id: str, snapshot_id: str) -> Optional[Dict[str, Any]]:
-        return self.repo.get(user_id=user_id, snapshot_id=snapshot_id)
+        """
+        获取特定快照
+        
+        Args:
+            user_id: 用户ID
+            snapshot_id: 快照ID
+            
+        Returns:
+            快照数据，如果不存在或无权访问则返回None
+        """
+        return self.repository.get(user_id=user_id, snapshot_id=snapshot_id)
 
 
-# ✅ 全局唯一实例
-snapshot_service = SnapshotService()
+# ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
+# 注意：这个实例在初始化时会报错，因为没有提供 repository
+# 在应用启动时，应该通过容器创建并替换这个实例
+snapshot_service = None  # 将在容器中初始化
 
 

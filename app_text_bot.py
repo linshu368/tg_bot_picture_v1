@@ -30,17 +30,45 @@ def main() -> None:
     logger = logging.getLogger(__name__)
 
     try:
-        from src.utils.config.settings import get_text_settings
+        from src.utils.config.settings import get_text_settings, get_settings
+        from src.core.container import setup_container, initialize_global_services
         
-        from src.interfaces.telegram.text_bot import TextBot
-        settings = get_text_settings()
+        # 1. 加载配置
+        text_settings = get_text_settings()
+        app_settings = get_settings()  # 加载完整配置（包含 Supabase 配置）
         
-        text_bot = TextBot(settings.text_bot.token)
-
         # 基本校验
-        if not getattr(settings.text_bot, 'token', ''):
+        if not getattr(text_settings.text_bot, 'token', ''):
             logger.error("❌ TEXT_BOT_TOKEN 未配置。请设置环境变量 TEXT_BOT_TOKEN 再重试。")
             sys.exit(1)
+        
+        # 2. 初始化依赖注入容器
+        container = setup_container(app_settings)
+        logger.info("✅ 依赖注入容器已初始化")
+        
+        # 3. 初始化 Supabase 连接
+        import asyncio
+        supabase_manager = container.get("supabase_manager")
+        asyncio.run(supabase_manager.initialize())
+        logger.info("✅ Supabase 连接已初始化")
+        
+        # 4. 初始化全局服务实例（为了向后兼容其他模块）
+        initialize_global_services(container)
+        logger.info("✅ 全局服务实例已初始化")
+        
+        # 5. 从容器获取已配置好的服务
+        session_service = container.get("session_service")
+        role_service = container.get("role_service")
+        snapshot_service = container.get("snapshot_service")
+        
+        # 6. 创建并启动 Bot（通过构造函数注入依赖）
+        from src.interfaces.telegram.text_bot import TextBot
+        text_bot = TextBot(
+            bot_token=text_settings.text_bot.token,
+            role_service=role_service,
+            snapshot_service=snapshot_service,
+            session_service=session_service
+        )
 
         logger.info("🤖 正在启动文字 Bot（Polling）…")
         text_bot.run()

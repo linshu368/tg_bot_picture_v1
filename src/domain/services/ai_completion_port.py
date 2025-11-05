@@ -219,15 +219,20 @@ class AICompletionPort:
         start = time.time()
         
         # 流式生成并逐步返回
+        chunk_count = 0
+        total_chars = 0
         async for partial_reply in self.gpt.get_stream_response(messages, model_name=role_data.get("model"), timeout=timeout):
+            chunk_count += 1
+            total_chars += len(partial_reply)
+            print(f"🔄 收到chunk #{chunk_count}: {len(partial_reply)} 字符 | 内容预览: {partial_reply[:50]}...")
             yield partial_reply
 
         # 结束流式生成
-        print(f"🤖 AI流式生成完成 | 耗时: {time.time() - start:.2f}秒")
+        print(f"🤖 AI流式生成完成 | 耗时: {time.time() - start:.2f}秒 | 总chunk数: {chunk_count} | 总字符数: {total_chars}")
         print("🤖" + "="*48)
 
 
-# ✅ 全局唯一实例 - 与其他服务保持一致的设计模式
-
-from demo.novel_async import AsyncNovelCaller
-ai_completion_port = AICompletionPort(AsyncNovelCaller())
+# ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
+# 注意：这个实例在初始化时会报错，因为没有提供 gpt_caller
+# 在应用启动时，应该通过容器创建并替换这个实例
+ai_completion_port = None  # 将在容器中初始化

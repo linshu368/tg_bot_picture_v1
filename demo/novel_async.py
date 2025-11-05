@@ -72,6 +72,12 @@ class AsyncNovelCaller:
             print(f"[Novel API] 发起请求到: {url}")
             print(f"[Novel API] 使用模型: {model}")
             print(f"[Novel API] 消息数量: {len(messages)}")
+        
+        # ⚠️ 临时强制开启debug日志用于排查问题
+        print(f"[Novel API DEBUG] 发起请求到: {url}")
+        print(f"[Novel API DEBUG] 使用模型: {model}")
+        print(f"[Novel API DEBUG] 消息数量: {len(messages)}")
+        debug = True  # 强制开启debug
 
         timeout_cfg = aiohttp.ClientTimeout(total=timeout)
         async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
@@ -116,7 +122,13 @@ class AsyncNovelCaller:
                                 delta = choices[0].get('delta') or {}
                                 content = delta.get('content')
                                 if content:
+                                    if debug:
+                                        print(f"[Novel API] yield content: {len(content)} chars")
                                     yield content
+                                elif debug:
+                                    print(f"[Novel API] delta 无 content: {delta}")
+                            elif debug:
+                                print(f"[Novel API] payload 无 choices: {payload}")
 
     async def get_response(
         self,

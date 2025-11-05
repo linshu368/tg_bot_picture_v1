@@ -4,11 +4,6 @@ import uuid
 from telegram.ext import ContextTypes
 from .base_callback_handler import BaseCallbackHandler, robust_callback_handler
 from ...ui_handler import UIHandler
-from src.domain.services.session_service_base import session_service
-from src.domain.services.message_service import message_service
-from src.domain.services.ai_completion_port import ai_completion_port
-from src.domain.services.role_service import role_service
-from src.domain.services.snapshot_service import snapshot_service
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
 class TextBotCallbackHandler(BaseCallbackHandler):
@@ -17,6 +12,17 @@ class TextBotCallbackHandler(BaseCallbackHandler):
     def __init__(self, bot_instance):
         super().__init__(bot_instance)
         self.logger = logging.getLogger(__name__)
+        
+        # 从 bot_instance 获取服务依赖（通过依赖注入）
+        self.session_service = bot_instance.session_service
+        self.role_service = bot_instance.role_service
+        
+        # ✅ 从全局模块获取已初始化的服务（在 initialize_global_services 后可用）
+        from src.domain.services.message_service import message_service
+        from src.domain.services.ai_completion_port import ai_completion_port
+        self.message_service = message_service
+        self.ai_completion_port = ai_completion_port
+        self.snapshot_service = bot_instance.snapshot_service
 
     def get_callback_handlers(self):
         """定义本 Bot 支持的回调动作"""
@@ -62,19 +68,19 @@ class TextBotCallbackHandler(BaseCallbackHandler):
 
         try:
             # 1. 从会话获取绑定的角色ID
-            role_id = await session_service.get_session_role_id(session_id)
+            role_id = await self.session_service.get_session_role_id(session_id)
             self.logger.info(f"📥 获取会话角色: session_id={session_id}, role_id={role_id}")
             
             # 2. 获取角色数据，如果角色不存在则使用默认角色
             if role_id:
-                role_data = role_service.get_role_by_id(role_id)
+                role_data = self.role_service.get_role_by_id(role_id)
             else:
                 role_data = None
                 
             if not role_data:
                 # 降级到默认角色 (从bot实例获取默认角色ID)
                 default_role_id = getattr(self.bot, 'default_role_id', '4')
-                role_data = role_service.get_role_by_id(default_role_id)
+                role_data = self.role_service.get_role_by_id(default_role_id)
                 self.logger.warning(f"⚠️ 角色不存在，使用默认角色: role_id={role_id} -> default={default_role_id}")
             
             if not role_data:
@@ -84,14 +90,14 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             self.logger.info(f"✅ 使用角色: {role_data.get('name', 'Unknown')} (ID: {role_data.get('role_id', 'Unknown')})")
             
             # 3. 获取会话上下文来源（判断是否为快照会话）
-            session_obj = await session_service.get_session(session_id)
+            session_obj = await self.session_service.get_session(session_id)
             context_source = session_obj.get("context_source") if session_obj else None
             
             # 4. 重新生成回复（传入上下文来源避免重复添加角色预置对话）
-            result = await message_service.regenerate_reply(
+            result = await self.message_service.regenerate_reply(
                 session_id=session_id,
                 last_message_id=user_message_id,   # ✅ 用 user_message_id 精确定位
-                ai_port=ai_completion_port,
+                ai_port=self.ai_completion_port,
                 role_data=role_data,  # ✅ 使用动态获取的角色数据
                 session_context_source=context_source  # ✅ 传入上下文来源
             )
@@ -117,20 +123,20 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         
         try:
             # 1. 获取当前会话的角色ID，保持角色不变
-            current_role_id = await session_service.get_session_role_id(current_session_id)
+            current_role_id = await self.session_service.get_session_role_id(current_session_id)
             if not current_role_id:
                 # 如果当前会话没有角色，使用默认角色
                 current_role_id = getattr(self.bot, 'default_role_id', '4')
                 self.logger.info(f"📥 当前会话无角色，使用默认角色: {current_role_id}")
             
             # 2. 创建新会话，保持相同角色
-            new_session = await session_service.new_session(user_id, current_role_id)
+            new_session = await self.session_service.new_session(user_id, current_role_id)
             new_session_id = new_session["session_id"]
             
             self.logger.info(f"✅ 创建新对话: session_id={new_session_id}, role_id={current_role_id}")
             
             # 3. 获取角色信息，发送角色欢迎语
-            role_data = role_service.get_role_by_id(current_role_id)
+            role_data = self.role_service.get_role_by_id(current_role_id)
             if role_data:
                 welcome_msg = f"🆕 已开启新对话\n\n💫 当前角色：{role_data.get('name', '未知角色')}\n\n{role_data.get('predefined_messages', '你好！')}"
             else:
@@ -182,7 +188,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             await query.answer("❌ 无效的会话")
             return
         try:
-            snapshot_id = await snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title="未命名")
+            snapshot_id = await self.snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title="未命名")
             self.logger.info(f"✅ 快照已保存(直接): snapshot_id={snapshot_id}")
             # 清理可能存在的命名态
             if getattr(self.bot, "pending_snapshot", None):
@@ -204,7 +210,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             await query.answer("❌ 无效的快照")
             return
         try:
-            ok = await snapshot_service.delete_snapshot(user_id=user_id, snapshot_id=snapshot_id)
+            ok = await self.snapshot_service.delete_snapshot(user_id=user_id, snapshot_id=snapshot_id)
             if ok:
                 await query.edit_message_text("🗑️ 已删除该记忆\n可在主菜单点击「🗂 历史聊天」查看当前记录")
                 await query.answer()
@@ -227,7 +233,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
 
         try:
             # 1) 读取快照并校验归属
-            snap = await snapshot_service.get_snapshot(user_id=user_id, snapshot_id=snapshot_id)
+            snap = await self.snapshot_service.get_snapshot(user_id=user_id, snapshot_id=snapshot_id)
             if not snap:
                 await query.answer("❌ 快照不存在或无权访问")
                 return
@@ -235,7 +241,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             role_id = snap.get("role_id") or getattr(self.bot, 'default_role_id', '4')
 
             # 2) 创建新会话并绑定角色
-            new_session = await session_service.new_session(user_id, role_id)
+            new_session = await self.session_service.new_session(user_id, role_id)
             new_session_id = new_session["session_id"]
 
             # 3) 预置历史消息（快照中的 messages 已包含预置与实际）
@@ -244,17 +250,17 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 role = m.get("role", "")
                 content = m.get("content", "")
                 if role and content:
-                    message_service.save_message(new_session_id, role, content)
+                    self.message_service.save_message(new_session_id, role, content)
 
             # 4) 写入会话上下文覆写（MVP：直接附加到会话字典）
-            session_obj = await session_service.get_session(new_session_id)
+            session_obj = await self.session_service.get_session(new_session_id)
             if session_obj is not None:
                 session_obj["model"] = snap.get("model", "")
                 session_obj["system_prompt"] = snap.get("system_prompt", "")
                 session_obj["context_source"] = "snapshot"
 
             # 5) 用户反馈
-            role_data = role_service.get_role_by_id(role_id)
+            role_data = self.role_service.get_role_by_id(role_id)
             role_name = role_data.get('name', '未知角色') if role_data else '未知角色'
             welcome_msg = f"🆕 已基于快照开启新对话\n\n💫 当前角色：{role_name}"
             await self._update_message(query, welcome_msg, session_id=new_session_id, user_message_id="")

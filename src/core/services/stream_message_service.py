@@ -15,8 +15,15 @@ class StreamMessageService:
     4. 处理错误和降级策略
     """
     
-    def __init__(self):
+    def __init__(self, role_service=None):
+        """
+        初始化流式消息服务
+        
+        Args:
+            role_service: 角色服务实例（通过依赖注入）
+        """
         self.logger = logging.getLogger(__name__)
+        self.role_service = role_service
     
     async def handle_stream_message(self, update: Update, user_id: str, content: str, ui_handler=None) -> None:
         """
@@ -205,7 +212,6 @@ class StreamMessageService:
         """获取会话和角色信息（从领域服务获取）"""
         from src.domain.services.session_service_base import session_service
         from src.domain.services.message_service import message_service
-        from src.domain.services.role_service import role_service
         
         # 简单校验
         if len(content) > 10000:
@@ -225,13 +231,13 @@ class StreamMessageService:
             await session_service.set_session_role_id(session_id, default_role_id)
             current_role_id = default_role_id
         
-        # 获取角色数据
-        role_data = role_service.get_role_by_id(current_role_id)
+        # 获取角色数据（使用注入的 role_service）
+        role_data = self.role_service.get_role_by_id(current_role_id)
         if not role_data:
             # 二次降级：角色ID对应的角色不存在
             self.logger.warning(f"⚠️ 角色不存在: role_id={current_role_id}，降级到默认角色")
             default_role_id = '4'
-            role_data = role_service.get_role_by_id(default_role_id)
+            role_data = self.role_service.get_role_by_id(default_role_id)
             if role_data:
                 await session_service.set_session_role_id(session_id, default_role_id)
         
@@ -259,5 +265,7 @@ class StreamMessageService:
         }
 
 
-# 全局单例实例
-stream_message_service = StreamMessageService()
+# 全局单例实例（临时占位，实际使用时应通过容器获取）
+# 注意：这个实例在初始化时可能缺少依赖
+# 在应用启动时，应该通过容器创建并替换这个实例
+stream_message_service = None  # 将在容器中初始化

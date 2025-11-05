@@ -104,36 +104,6 @@ class MessageService:
         return {"message_id": bot_message_id, "reply": reply}
 
 
-# ✅ 全局唯一实例
-message_service = MessageService()
-
-    # # 未来可迁出为ConversationService
-    # async def regenerate_reply(self, session_id: str, last_message_id: str, ai_port, role_data):
-    #     """
-    #     基于指定用户消息重新生成回复
-    #     - 精确定位 last_message_id
-    #     - 删除旧的 Bot 回复
-    #     - 保存新的 Bot 回复
-    #     """
-    #     history = self.get_history(session_id)
-    #     if not history:
-    #         return {"message_id": None, "reply": "⚠️ 没有找到历史记录"}
-
-    #     # 1. 定位到用户消息
-    #     target_index = next((i for i, msg in enumerate(history) if msg["message_id"] == last_message_id and msg["role"] == "user"), None)
-    #     if target_index is None:
-    #         return {"message_id": None, "reply": "⚠️ 无法找到指定的用户消息"}
-
-    #     user_input = history[target_index]["content"]
-
-    #     # 2. 删除该用户消息之后的 Bot 回复（保持一问一答的配对）
-    #     history = history[:target_index + 1]  # 保留到用户消息
-    #     self._store[session_id] = history
-
-    #     # 3. 重新生成 AI 回复
-    #     reply = await ai_port.generate_reply(role_data, history, user_input)
-
-    #     # 4. 保存新的 Bot 回复
-    #     bot_message_id = self.save_message(session_id, "assistant", reply)
-
-    #     return {"message_id": bot_message_id, "reply": reply}
+# ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
+# 在应用启动时，应该通过容器创建并替换这个实例
+message_service = None  # 将在容器中初始化

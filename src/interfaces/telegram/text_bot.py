@@ -12,12 +12,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
-from src.interfaces.telegram.controllers.session_controller import process_message
 from src.interfaces.telegram.handlers.callback.text_bot_callback_handler import TextBotCallbackHandler
 from src.interfaces.telegram.ui_handler import UIHandler
-from src.domain.services.role_service import RoleService
-from src.domain.services.session_service_base import session_service
-from src.domain.services.snapshot_service import snapshot_service
 
 
 class DummyService:
@@ -32,12 +28,26 @@ class TextBot:
     - start()/stop(): 异步方式，便于与现有异步应用编排
     """
 
-    def __init__(self, bot_token: str):
+    def __init__(self, bot_token: str, role_service=None, snapshot_service=None, session_service=None):
+        """
+        初始化 TextBot
+        
+        Args:
+            bot_token: Bot Token
+            role_service: 角色服务实例（通过容器注入）
+            snapshot_service: 快照服务实例（通过容器注入）
+            session_service: 会话服务实例（通过容器注入）
+        """
         self.bot_token = bot_token
         self.logger = logging.getLogger(__name__)
         self._application: Optional[Application] = None
         self.ui_handler = UIHandler()
-        self.role_service = RoleService()
+        
+        # 依赖注入的服务
+        self.role_service = role_service
+        self.snapshot_service = snapshot_service
+        self.session_service = session_service
+        
         self.default_role_id = "4" #默认角色ID
         # 从环境变量读取角色频道URL，根据MODE选择默认值
         mode = os.getenv("MODE", "staging")
@@ -135,7 +145,7 @@ class TextBot:
             
             if role:
                 # 2. 创建新会话并绑定指定角色（强制替换旧会话）
-                session = await session_service.new_session(user_id, role_id)
+                session = await self.session_service.new_session(user_id, role_id)
                 self.logger.info(f"✅ 创建新会话: session_id={session['session_id']}, role_id={role_id}")
                 
                 # 3. 发送角色切换提示 + 角色卡预览（合并消息）
@@ -210,7 +220,7 @@ class TextBot:
             )
             
             # 2. 创建会话并绑定默认角色
-            session = await session_service.create_session_with_role(user_id, self.default_role_id)
+            session = await self.session_service.create_session_with_role(user_id, self.default_role_id)
             self.logger.info(f"✅ 创建会话: session_id={session['session_id']}, role_id={self.default_role_id}")
             
             # 3. 获取默认角色数据
@@ -243,7 +253,7 @@ class TextBot:
     async def _handle_snapshot_preview(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: str, snapshot_id: str) -> None:
         """通过 deeplink 打开某个快照的预览：角色卡预览 + 最后一条消息 + 操作按钮"""
         try:
-            snap = await snapshot_service.get_snapshot(user_id=user_id, snapshot_id=snapshot_id)
+            snap = await self.snapshot_service.get_snapshot(user_id=user_id, snapshot_id=snapshot_id)
         except Exception as e:
             self.logger.error(f"❌ 获取快照失败: {e}")
             await update.message.reply_text("❌ 获取快照失败")
@@ -303,7 +313,7 @@ class TextBot:
             session_id = self.pending_snapshot[user_id].get("session_id")
             try:
                 title = content.strip() if content.strip() else "未命名"
-                snapshot_id = await snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title=title)
+                snapshot_id = await self.snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title=title)
                 self.logger.info(f"✅ 快照已保存(命名): snapshot_id={snapshot_id}")
                 await update.message.reply_text("✅ 保存成功，可在主菜单点击「🗂 历史聊天」查看保存结果。也可直接发送消息继续对话")
             except Exception as e:
@@ -447,7 +457,7 @@ class TextBot:
         """历史聊天列表：以 deeplink 链接形式展示最近快照"""
         self.logger.info(f"🗂 历史聊天列表 user_id={user_id}")
         try:
-            snapshots = await snapshot_service.list_snapshots(user_id)
+            snapshots = await self.snapshot_service.list_snapshots(user_id)
         except Exception as e:
             self.logger.error(f"❌ 拉取历史聊天失败: {e}")
             await update.message.reply_text("❌ 拉取历史聊天失败，请稍后重试")
