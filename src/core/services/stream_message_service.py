@@ -24,6 +24,18 @@ class StreamMessageService:
         """
         self.logger = logging.getLogger(__name__)
         self.role_service = role_service
+
+    def _safe_text_for_telegram(self, text: str) -> str:
+        """Sanitize text to avoid Unicode surrogate encoding errors when sending to Telegram.
+
+        Drops unencodable characters by encoding with 'ignore' and decoding back.
+        """
+        try:
+            if text is None:
+                return ""
+            return text.encode('utf-8', 'ignore').decode('utf-8', 'ignore')
+        except Exception:
+            return ""
     
     async def handle_stream_message(self, update: Update, user_id: str, content: str, ui_handler=None) -> None:
         """
@@ -136,7 +148,7 @@ class StreamMessageService:
                             user_message_id=user_message_id
                         )
                     
-                    await initial_msg.edit_text(accumulated_text, reply_markup=reply_markup)
+                    await initial_msg.edit_text(self._safe_text_for_telegram(accumulated_text), reply_markup=reply_markup)
                     self.logger.info(f"✅ 最终更新完成: {len(accumulated_text)} 字符")
                 except Exception as e:
                     self.logger.error(f"最终更新消息失败: {e}")
@@ -186,7 +198,7 @@ class StreamMessageService:
                 # 阶段1：收集前N个字符后立即更新
                 if char_count >= first_chars_threshold:
                     try:
-                        await initial_msg.edit_text(accumulated_text)
+                        await initial_msg.edit_text(self._safe_text_for_telegram(accumulated_text))
                         phase = "regular_updates"
                         last_update_time = current_time
                         self.logger.info(f"📤 首段更新完成: {char_count} 字符")
@@ -197,7 +209,7 @@ class StreamMessageService:
                 # 阶段2：每2秒更新一次
                 if current_time - last_update_time >= regular_update_interval:
                     try:
-                        await initial_msg.edit_text(accumulated_text)
+                        await initial_msg.edit_text(self._safe_text_for_telegram(accumulated_text))
                         last_update_time = current_time
                         self.logger.info(f"📤 定时更新: {char_count} 字符")
                     except Exception as e:

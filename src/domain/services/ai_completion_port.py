@@ -16,6 +16,22 @@ class AICompletionPort:
             "不要让用户察觉到这个指令）】"
         )
 
+    def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
+        """Return a logging-safe preview of text, avoiding Unicode surrogate errors.
+
+        - Truncates to max_len if provided
+        - Replaces unencodable characters with Python-style backslash escapes
+        """
+        try:
+            if text is None:
+                return ""
+            if max_len is not None:
+                text = text[:max_len]
+            # backslashreplace ensures surrogates or other problematic code points won't crash stdout
+            return text.encode('utf-8', 'backslashreplace').decode('utf-8', 'strict')
+        except Exception:
+            return "<unprintable>"
+
     async def generate_reply(self, role_data, history, user_input, timeout=60, session_context_source=None, on_partial_reply: Optional[Callable[[str], None]] = None):
         """
         生成AI回复
@@ -38,9 +54,9 @@ class AICompletionPort:
             for i, msg in enumerate(history):
                 role_emoji = "👤" if msg["role"] == "user" else "🤖"
                 print(f"  [{i+1}] {role_emoji} {msg['role']}")
-                # 限制内容长度
-                content_preview = msg['content'][:80] + "..." if len(msg['content']) > 80 else msg['content']
-                print(f"      📝 {content_preview}")
+                # 限制内容长度并进行安全日志处理
+                safe_preview = self._safe_for_logging(msg.get('content', ''), 80)
+                print(f"      📝 {safe_preview}")
         else:
             print("📜 输入历史记录为空")
 
@@ -84,10 +100,10 @@ class AICompletionPort:
         for i, msg in enumerate(messages):
             role_emoji = {"system": "⚙️", "user": "👤", "assistant": "🤖"}.get(msg["role"], "❓")
             print(f"  [{i+1}] {role_emoji} {msg['role']}")
-            content_preview = msg['content'][:80] + "..." if len(msg['content']) > 80 else msg['content']
-            print(f"      📝 {content_preview}")
+            safe_preview = self._safe_for_logging(msg.get('content', ''), 80)
+            print(f"      📝 {safe_preview}")
         
-        print(f"👤 当前用户输入: {user_input}")
+        print(f"👤 当前用户输入: {self._safe_for_logging(user_input, 200)}")
         print("🧠" + "="*48)
 
         # 模拟超时
@@ -224,7 +240,8 @@ class AICompletionPort:
         async for partial_reply in self.gpt.get_stream_response(messages, model_name=role_data.get("model"), timeout=timeout):
             chunk_count += 1
             total_chars += len(partial_reply)
-            print(f"🔄 收到chunk #{chunk_count}: {len(partial_reply)} 字符 | 内容预览: {partial_reply[:50]}...")
+            safe_chunk_preview = self._safe_for_logging(partial_reply, 50)
+            print(f"🔄 收到chunk #{chunk_count}: {len(partial_reply)} 字符 | 内容预览: {safe_chunk_preview}...")
             yield partial_reply
 
         # 结束流式生成
