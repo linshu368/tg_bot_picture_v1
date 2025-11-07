@@ -223,7 +223,8 @@ class TextBot:
             role_gallery_keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📚 浏览角色图鉴", url=self.role_channel_url)]
             ])
-            await update.message.reply_text(
+            # 创建组合键盘：底部键盘 + 内联键盘
+            combined_message = await update.message.reply_text(
                 """让AI为你提供理想陪伴：
 • 💕 甜蜜的恋爱互动
 • 💌 深夜的暧昧幻想
@@ -236,9 +237,17 @@ class TextBot:
 • 支持白嫖，签到拉人均可获取积分，价格也不贵
 
 🎮 开始体验:
-1. 直接发送消息即可与默认女友"小鹿"对话
-2. 点击「选择角色」 查看角色图鉴，或在角色卡频道选择更多角色""",
+1. 直接发送消息即可与默认角色"卡莲"对话
+2. 点击「选择角色」 查看角色图鉴，或在角色卡频道选择更多角色
+
+📚 点击下方按钮浏览角色图鉴""",
                 reply_markup=role_gallery_keyboard
+            )
+            
+            # 发送一条空消息来设置底部键盘
+            await update.message.reply_text(
+                "🍬 已进入对话 ⬇️",
+                reply_markup=main_menu
             )
             
             # 2. 创建会话并绑定默认角色
@@ -347,16 +356,7 @@ class TextBot:
             return
 
         # 处理底部主菜单按钮
-        if content == "👤 个人中心":
-            await self._handle_profile(update, user_id)
-            return
-        elif content == "💳 充值积分":
-            await self._handle_buy_credits(update, user_id)
-            return
-        elif content == "🎁 每日签到":
-            await self._handle_daily_checkin(update, user_id)
-            return
-        elif content == "🎭 选择角色":
+        if content == "🎭 选择角色":
             await self._handle_role_selection(update, user_id)
             return
         elif content == "🗂 历史聊天":
@@ -376,63 +376,8 @@ class TextBot:
     # -------------------------
     # 底部菜单处理方法
     # -------------------------
-    async def _handle_profile(self, update: Update, user_id: str) -> None:
-        """处理个人中心"""
-        self.logger.info(f"👤 个人中心 user_id={user_id}")
-        
-        # TODO: 从数据库获取真实用户信息
-        profile_text = f"""👤 **个人中心**
-
-🆔 用户ID: `{user_id}`
-💰 当前积分: 100
-🎁 签到天数: 3
-📅 注册时间: 2025-01-01
-
-💡 提示：使用下方按钮查看更多详情
-"""
-        
-        keyboard = self.ui_handler.create_profile_menu_keyboard()
-        await update.message.reply_text(profile_text, reply_markup=keyboard, parse_mode='Markdown')
     
-    async def _handle_buy_credits(self, update: Update, user_id: str) -> None:
-        """处理充值积分"""
-        self.logger.info(f"💳 充值积分 user_id={user_id}")
-        
-        # TODO: 实现真实的充值逻辑
-        buy_text = """💳 **充值积分**
-
-📦 充值套餐：
-• 💎 小额套餐：10元 = 100积分
-• 💎 标准套餐：30元 = 350积分
-• 💎 超值套餐：50元 = 600积分
-• 💎 豪华套餐：100元 = 1300积分
-
-💡 提示：首次充值享受额外赠送！
-
-⚠️ 充值功能开发中，敬请期待...
-"""
-        
-        await update.message.reply_text(buy_text, parse_mode='Markdown')
     
-    async def _handle_daily_checkin(self, update: Update, user_id: str) -> None:
-        """处理每日签到"""
-        self.logger.info(f"🎁 每日签到 user_id={user_id}")
-        
-        # TODO: 实现真实的签到逻辑
-        checkin_text = """🎁 **每日签到**
-
-✅ 签到成功！
-🎉 获得 10 积分奖励
-
-📊 签到统计：
-• 连续签到：3天
-• 累计签到：15天
-• 本月签到：8天
-
-💡 提示：连续签到7天可获得额外奖励！
-"""
-        
-        await update.message.reply_text(checkin_text, parse_mode='Markdown')
     
     async def _handle_help(self, update: Update, user_id: str) -> None:
         """处理帮助"""
@@ -444,32 +389,18 @@ class TextBot:
 
 💬 **对话功能**
 • 直接发送消息与AI角色对话
-• 使用 /list 查看角色列表
-• 使用 /create 创建自定义角色
-
-👤 **个人中心**
-• 查看积分余额和签到记录
-• 查看订单历史
-• 管理个人资料
-
-💳 **充值积分**
-• 多种充值套餐可选
-• 首次充值享额外赠送
-• 支持多种支付方式
-
-🎁 **每日签到**
-• 每日签到获得免费积分
-• 连续签到获得额外奖励
+• 点击“🎭 选择角色” 查看角色列表
+• 点击“🗂 历史聊天” 查看历史聊天记录
 
 🔄 **重新生成**
-• 对AI回复不满意？点击"🔄 重新生成"按钮
+• 对角色回复不满意？点击"🔄 重新生成"按钮
 
 🆕 **新的对话**
-• 想要开始新话题？点击"🆕 新的对话"按钮
+• 想要开始新对话？点击"🆕 新的对话"按钮
 
 📞 **联系我们：**
 • 遇到问题请联系客服
-• 客服Telegram: @support
+• 客服Telegram: @Isyuyuya
 
 💡 更多功能开发中，敬请期待...
 """

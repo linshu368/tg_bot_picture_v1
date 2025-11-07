@@ -32,49 +32,11 @@ class UIHandler:
     def create_main_menu_keyboard() -> ReplyKeyboardMarkup:
         """创建主菜单键盘（底部常驻键盘）"""
         keyboard = [
-            [KeyboardButton("💳 充值积分")],
-            [KeyboardButton("👤 个人中心"), KeyboardButton("🎁 每日签到")],
             [KeyboardButton("🎭 选择角色")],
             [KeyboardButton("🗂 历史聊天")],
             [KeyboardButton("❓ 帮助")],
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    @staticmethod
-    def create_profile_menu_keyboard() -> InlineKeyboardMarkup:
-        """创建个人中心菜单键盘"""
-        keyboard = [
-            [
-                InlineKeyboardButton("📊 积分记录", callback_data="profile_view_records")
-            ],
-            [
-                InlineKeyboardButton("🆔 我的身份码", callback_data="profile_view_uid")
-            ],
-            [
-                InlineKeyboardButton("📋 我的订单", callback_data="profile_view_orders")
-            ],
-            [
-                InlineKeyboardButton("🛒 充值积分", callback_data="profile_buy_credits")
-            ],
-            [
-                InlineKeyboardButton("🎁 每日签到", callback_data="daily_checkin")
-            ]
-        ]
-        return InlineKeyboardMarkup(keyboard)
     
-    @staticmethod
-    def create_insufficient_points_keyboard() -> InlineKeyboardMarkup:
-        """创建积分不足时的键盘"""
-        keyboard = [
-            [
-                InlineKeyboardButton("🎁 每日签到", callback_data="daily_checkin")
-            ],
-            [
-                InlineKeyboardButton("🛒 购买积分", callback_data="buy_credits")
-            ],
-            [
-                InlineKeyboardButton("🔙 返回主菜单", callback_data="back_to_main")
-            ]
-        ]
-        return InlineKeyboardMarkup(keyboard)
 
