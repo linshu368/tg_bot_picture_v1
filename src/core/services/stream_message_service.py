@@ -231,6 +231,16 @@ class StreamMessageService:
         if len(content) > 10000:
             return {"code": 4002, "message": "消息过长，最大长度 10000", "data": None}
 
+        # 检查每日消息限制
+        limit_check = await message_service.check_daily_limit(user_id)
+        if not limit_check["allowed"]:
+            self.logger.warning(f"🚫 用户超出每日消息限制: user_id={user_id}, current_count={limit_check['current_count']}, limit={limit_check['limit']}")
+            return {
+                "code": 4003, 
+                "message": "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！", 
+                "data": None
+            }
+
         # 获取或创建会话
         session = await session_service.get_or_create_session(user_id)
         session_id = session["session_id"]
@@ -315,6 +325,7 @@ class StreamMessageService:
                 "context_source": context_source
             }
         }
+    
 
 
 # 全局单例实例（临时占位，实际使用时应通过容器获取）

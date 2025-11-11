@@ -178,6 +178,12 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
     if len(content) > 10000:
         return {"code": 4002, "message": "消息过长，最大长度 10000", "data": None}
 
+    # 检查每日消息限制
+    limit_check = await message_service.check_daily_limit(user_id)
+    if not limit_check["allowed"]:
+        logger.warning(f"🚫 用户超出每日消息限制: user_id={user_id}, current_count={limit_check['current_count']}, limit={limit_check['limit']}")
+        return envelope_error(4003, f"您今日的免费体验次数已用完，明日0点重置。感谢您的使用！")
+
     # 获取或创建会话（大部分情况下是获取已存在的会话）
     session = await session_service.get_or_create_session(user_id)
     session_id = session["session_id"]

@@ -87,11 +87,18 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         )
 
         try:
-            # 1. 从会话获取绑定的角色ID
+            # 1. 检查每日消息限制（重新生成也算作一次AI调用）
+            limit_check = await self.message_service.check_daily_limit(user_id)
+            if not limit_check["allowed"]:
+                self.logger.warning(f"🚫 用户重新生成超出每日限制: user_id={user_id}, current_count={limit_check['current_count']}, limit={limit_check['limit']}")
+                await query.answer("您今日的免费体验次数已用完，明日0点重置。感谢您的使用！", show_alert=True)
+                return
+            
+            # 2. 从会话获取绑定的角色ID
             role_id = await self.session_service.get_session_role_id(session_id)
             self.logger.info(f"📥 获取会话角色: session_id={session_id}, role_id={role_id}")
             
-            # 2. 获取角色数据，如果角色不存在则使用默认角色
+            # 3. 获取角色数据，如果角色不存在则使用默认角色
             if role_id:
                 role_data = self.role_service.get_role_by_id(role_id)
             else:
@@ -109,23 +116,23 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 
             self.logger.info(f"✅ 使用角色: {role_data.get('name', 'Unknown')} (ID: {role_data.get('role_id', 'Unknown')})")
             
-            # 3. 获取会话上下文来源（判断是否为快照会话）
+            # 4. 获取会话上下文来源（判断是否为快照会话）
             session_obj = await self.session_service.get_session(session_id)
             context_source = session_obj.get("context_source") if session_obj else None
             
-            # 4. 禁用原消息按钮
+            # 5. 禁用原消息按钮
             await query.edit_message_reply_markup(reply_markup=None)
             
-            # 5. 截断历史记录并获取用户消息内容
+            # 6. 截断历史记录并获取用户消息内容
             user_input = self.message_service.truncate_history_after_message(session_id, user_message_id)
             if not user_input:
                 await query.message.reply_text("❌ 无法找到指定的用户消息")
                 return
             
-            # 6. 发送新的初始消息
+            # 7. 发送新的初始消息
             initial_msg = await query.message.reply_text("✍️输入中...")
             
-            # 7. 执行流式重新生成
+            # 8. 执行流式重新生成
             await self._execute_regenerate_stream_reply(
                 initial_msg=initial_msg,
                 role_data=role_data,

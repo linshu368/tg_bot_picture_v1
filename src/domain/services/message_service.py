@@ -89,6 +89,57 @@ class MessageService:
             self.logger.error(f"❌ 获取用户消息数量失败: {e}")
             return 0
     
+    async def check_daily_limit(self, user_id: str, daily_limit: int = 40) -> dict:
+        """
+        检查用户今日消息数量是否超过限制
+        
+        Args:
+            user_id: 用户ID
+            daily_limit: 每日限制数量，默认40条
+            
+        Returns:
+            dict: {
+                "allowed": bool,  # 是否允许发送
+                "current_count": int,  # 当前已发送数量
+                "limit": int,  # 限制数量
+                "remaining": int  # 剩余数量
+            }
+        """
+        try:
+            if self.message_repository is None:
+                # 无数据库连接时，默认允许
+                return {
+                    "allowed": True,
+                    "current_count": 0,
+                    "limit": daily_limit,
+                    "remaining": daily_limit
+                }
+            
+            # 获取今日已发送消息数量
+            current_count = await self.message_repository.get_user_daily_message_count(str(user_id))
+            remaining = max(0, daily_limit - current_count)
+            allowed = current_count < daily_limit
+            
+            result = {
+                "allowed": allowed,
+                "current_count": current_count,
+                "limit": daily_limit,
+                "remaining": remaining
+            }
+            
+            self.logger.info(f"🔍 每日限制检查: user_id={user_id}, result={result}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ 检查每日限制失败: {e}")
+            # 发生错误时默认允许，避免影响用户体验
+            return {
+                "allowed": True,
+                "current_count": 0,
+                "limit": daily_limit,
+                "remaining": daily_limit
+            }
+    
     async def _get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取会话信息（带缓存）"""
         # 先检查缓存

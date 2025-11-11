@@ -135,6 +135,44 @@ class SupabaseMessageRepository:
             self.logger.error(f"❌ 获取用户消息数量失败: {e}")
             return 0
     
+    async def get_user_daily_message_count(self, user_id: str) -> int:
+        """
+        获取用户今日消息数量统计（按东八区时间计算）
+        
+        Args:
+            user_id: 用户ID
+            
+        Returns:
+            今日消息数量
+        """
+        try:
+            client = self.supabase_manager.get_client()
+            
+            # 获取东八区今日开始时间（UTC+8）
+            from datetime import datetime, timezone, timedelta
+            beijing_tz = timezone(timedelta(hours=8))
+            now_beijing = datetime.now(beijing_tz)
+            today_start_beijing = now_beijing.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # 转换为UTC时间用于数据库查询
+            today_start_utc = today_start_beijing.astimezone(timezone.utc)
+            
+            query = client.table(self.table_name)\
+                .select("id", count="exact")\
+                .eq("user_id", user_id)\
+                .eq("sender", "user")\
+                .gte("timestamp", today_start_utc.isoformat())
+            
+            result = query.execute()
+            
+            count = result.count or 0
+            self.logger.info(f"📊 用户今日消息统计: user_id={user_id}, count={count}")
+            return count
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取用户今日消息数量失败: {e}")
+            return 0
+    
     async def delete_messages_by_session(self, session_id: str) -> bool:
         """
         删除指定会话的所有消息
