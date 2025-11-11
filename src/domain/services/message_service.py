@@ -1,8 +1,17 @@
 import uuid
+import asyncio
+import logging
+from typing import Optional, Dict, Any, List
 
 class MessageService:
-    def __init__(self):
+    def __init__(self, message_repository=None, session_service=None):
         self._store = {}  # { session_id: [ {role, content, message_id} ] }
+        self.message_repository = message_repository
+        self.session_service = session_service
+        self.logger = logging.getLogger(__name__)
+        
+        # 用于存储会话相关信息的缓存
+        self._session_cache = {}  # { session_id: { user_id, role_id } }
 
     def save_message(self, session_id, role, content):
         if len(content) > 10000:
@@ -23,7 +32,71 @@ class MessageService:
         print(f"📊 当前会话消息数: {len(self._store[session_id])}")
         print("-" * 50)
         
+        # 异步写入Supabase（如果配置了message_repository）
+        if self.message_repository and self.session_service:
+            # 在后台异步执行，不阻塞主流程
+            asyncio.create_task(self._async_save_to_supabase(session_id, role, content, message_id))
+        
         return message_id
+    
+    async def _async_save_to_supabase(self, session_id: str, role: str, content: str, message_id: str):
+        """异步保存消息到Supabase"""
+        try:
+            # 获取会话信息（用户ID和角色ID）
+            session_info = await self._get_session_info(session_id)
+            if not session_info:
+                self.logger.warning(f"⚠️ 无法获取会话信息: session_id={session_id}")
+                return
+            
+            user_id = session_info.get("user_id")
+            role_id = session_info.get("role_id")  # 可以为 None
+            
+            if not user_id:
+                self.logger.warning(f"⚠️ 会话缺少用户ID: session_id={session_id}")
+                return
+            
+            # 转换为字符串类型（适配 TEXT 字段）
+            user_id = str(user_id)
+            role_id = str(role_id) if role_id is not None else None
+            
+            # 转换role格式：assistant -> bot
+            sender = "bot" if role == "assistant" else "user"
+            
+            # 保存到Supabase
+            await self.message_repository.save_message(
+                user_id=user_id,
+                role_id=role_id,
+                session_id=session_id,
+                message=content,
+                sender=sender
+            )
+            
+            self.logger.info(f"✅ 消息已异步保存到Supabase: session_id={session_id}, sender={sender}, user_id={user_id}, role_id={role_id}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 异步保存消息到Supabase失败: {e}")
+    
+    async def _get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """获取会话信息（带缓存）"""
+        # 先检查缓存
+        if session_id in self._session_cache:
+            return self._session_cache[session_id]
+        
+        # 从session_service获取
+        try:
+            session = await self.session_service.get_session(session_id)
+            if session:
+                session_info = {
+                    "user_id": session.get("user_id"),
+                    "role_id": session.get("role_id")  # 保持 None 而不是空字符串
+                }
+                # 缓存结果
+                self._session_cache[session_id] = session_info
+                return session_info
+        except Exception as e:
+            self.logger.error(f"❌ 获取会话信息失败: {e}")
+        
+        return None
 
     def get_history(self, session_id):
         history = self._store.get(session_id, [])

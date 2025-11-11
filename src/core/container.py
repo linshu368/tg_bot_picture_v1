@@ -107,6 +107,12 @@ def setup_container(settings) -> Container:
     
     container.register_factory("snapshot_repository", snapshot_repository_factory)
     
+    def message_repository_factory(c):
+        from src.infrastructure.repositories_v2.supabase_message_repository import SupabaseMessageRepository
+        return SupabaseMessageRepository(c.get("supabase_manager"))
+    
+    container.register_factory("message_repository", message_repository_factory)
+    
     # 注册 Service 层
     def session_service_factory(c):
         from src.domain.services.session_service_base import SessionService
@@ -141,7 +147,10 @@ def setup_container(settings) -> Container:
     # 注册消息服务
     def message_service_factory(c):
         from src.domain.services.message_service import MessageService
-        return MessageService()
+        return MessageService(
+            message_repository=c.get("message_repository"),
+            session_service=c.get("session_service")
+        )
     
     container.register_factory("message_service", message_service_factory)
     
