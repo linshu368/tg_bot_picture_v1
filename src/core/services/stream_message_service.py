@@ -1,5 +1,6 @@
 # stream_message_service.py - 流式消息处理服务（应用核心层）
 import time
+from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, Optional
 from telegram import Update
@@ -258,9 +259,47 @@ class StreamMessageService:
             self.logger.error(f"❌ 角色配置错误: 默认角色也不存在")
             return {"code": 4001, "message": "角色配置错误", "data": None}
 
+        # 埋点：在保存用户消息之前判断是否为首条消息（以 Supabase 持久化为准）
+        try:
+            from src.domain.services.message_service import message_service as _msg_service
+            from src.infrastructure.analytics.analytics import track_event_background as _track_bg, is_enabled as _analytics_enabled
+            if _analytics_enabled():
+                # 统计历史消息（仅 sender='user'）
+                user_count = await _msg_service.get_user_message_count(user_id)
+                if user_count == 0:
+                    _track_bg(
+                        distinct_id=str(user_id),
+                        event="first_message_sent",
+                        properties={
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "session_id": session_id,
+                            "role_id": current_role_id
+                        }
+                    )
+        except Exception as e:
+            # 任何异常都不影响主流程
+            self.logger.debug(f"PostHog first_message_sent 事件跳过: {e}")
+
         # 保存用户消息并获取历史
         user_message_id = message_service.save_message(session_id, "user", content)
         history = message_service.get_history(session_id)
+
+        # 埋点：message_sent（每条用户消息）
+        try:
+            from src.infrastructure.analytics.analytics import track_event_background as _track_bg2, is_enabled as _analytics_enabled2
+            if _analytics_enabled2():
+                _track_bg2(
+                    distinct_id=str(user_id),
+                    event="message_sent",
+                    properties={
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "session_id": session_id,
+                        "role_id": current_role_id
+                    }
+                )
+        except Exception as e:
+            # 任何异常都不影响主流程
+            self.logger.debug(f"PostHog message_sent 事件跳过: {e}")
         
         # 获取会话上下文来源
         context_source = session.get("context_source") if session else None

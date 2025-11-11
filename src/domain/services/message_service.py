@@ -76,6 +76,19 @@ class MessageService:
         except Exception as e:
             self.logger.error(f"❌ 异步保存消息到Supabase失败: {e}")
     
+    async def get_user_message_count(self, user_id: str) -> int:
+        """
+        获取用户历史发送消息数量（以 Supabase 为准；无仓储时返回 0）
+        """
+        try:
+            if self.message_repository is None:
+                return 0
+            # 仓储方法已按 sender='user' 过滤
+            return await self.message_repository.get_user_message_count(str(user_id))
+        except Exception as e:
+            self.logger.error(f"❌ 获取用户消息数量失败: {e}")
+            return 0
+    
     async def _get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取会话信息（带缓存）"""
         # 先检查缓存
