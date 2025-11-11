@@ -110,7 +110,7 @@ async def regenerate_reply(session_id: str, input_dto: RegenerateInput):
         
         if not role_data:
             # 降级到默认角色
-            default_role_id = '4'
+            default_role_id = '46'
             role_data = role_service.get_role_by_id(default_role_id)
         
         if not role_data:
@@ -197,7 +197,7 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
             logger.info(f"📥 使用传入角色ID: {role_id}")
         else:
             # 使用默认角色（最常见的兜底情况）
-            default_role_id = '4'
+            default_role_id = '46'
             await session_service.set_session_role_id(session_id, default_role_id)
             current_role_id = default_role_id
             logger.info(f"📥 使用默认角色ID: {default_role_id}")
@@ -207,7 +207,7 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
     if not role_data:
         # 二次降级：角色ID对应的角色不存在
         logger.warning(f"⚠️ 角色不存在: role_id={current_role_id}，降级到默认角色")
-        default_role_id = '4'
+        default_role_id = '46'
         role_data = role_service.get_role_by_id(default_role_id)
         if role_data:
             await session_service.set_session_role_id(session_id, default_role_id)

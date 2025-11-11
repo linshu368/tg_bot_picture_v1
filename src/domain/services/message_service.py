@@ -176,6 +176,54 @@ class MessageService:
 
         return {"message_id": bot_message_id, "reply": reply}
 
+    def truncate_history_after_message(self, session_id: str, user_message_id: str) -> Optional[str]:
+        """
+        截断指定用户消息之后的所有回复，并返回用户消息内容
+        
+        Args:
+            session_id: 会话ID
+            user_message_id: 用户消息ID
+            
+        Returns:
+            用户消息内容，如果找不到则返回None
+        """
+        history = self.get_history(session_id)
+        logger = logging.getLogger(__name__)
+        logger.info(f"[DEBUG] truncate_history_after_message: session_id={session_id}, user_message_id={user_message_id}")
+
+        if not history:
+            logger.warning(f"[DEBUG] truncate_history_after_message: history is empty for session_id={session_id}")
+            return None
+
+        # 1. 定位到用户消息
+        target_index = next(
+            (i for i, msg in enumerate(history) if msg["message_id"] == user_message_id and msg["role"] == "user"),
+            None
+        )
+        logger.info(f"[DEBUG] truncate_history_after_message: target_index={target_index}")
+
+        if target_index is None:
+            logger.warning(
+                f"[DEBUG] truncate_history_after_message: cannot find user message_id={user_message_id} in history "
+                f"(session_id={session_id})"
+            )
+            return None
+
+        user_input = history[target_index]["content"]
+        logger.info(f"[DEBUG] truncate_history_after_message: found user_input={user_input}")
+
+        # 2. 删除该用户消息之后的所有回复
+        truncated_history = history[:target_index + 1]
+        self._store[session_id] = truncated_history
+        logger.info(f"[DEBUG] truncate_history_after_message: truncated history length={len(truncated_history)}")
+        
+        # 打印截断信息
+        print(f"✂️ 截断历史记录 | Session: {session_id} | 基于用户消息ID: {user_message_id}")
+        print(f"📊 截断前: {len(history)} 条消息 | 截断后: {len(truncated_history)} 条消息")
+        print("=" * 50)
+
+        return user_input
+
 
 # ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
 # 在应用启动时，应该通过容器创建并替换这个实例

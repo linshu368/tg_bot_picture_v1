@@ -71,7 +71,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
     # -------------------------
     @robust_callback_handler
     async def _on_regenerate(self, query, context: ContextTypes.DEFAULT_TYPE):
-        """点击 重新生成 按钮"""
+        """点击 重新生成 按钮 - 流式重新生成"""
         self.logger.info(f"📥 收到回调 action=regenerate data={query.data} user_id={query.from_user.id}")
         user_id = str(query.from_user.id)
         raw_data = query.data
@@ -99,12 +99,12 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 
             if not role_data:
                 # 降级到默认角色 (从bot实例获取默认角色ID)
-                default_role_id = getattr(self.bot, 'default_role_id', '4')
+                default_role_id = getattr(self.bot, 'default_role_id', '46')
                 role_data = self.role_service.get_role_by_id(default_role_id)
                 self.logger.warning(f"⚠️ 角色不存在，使用默认角色: role_id={role_id} -> default={default_role_id}")
             
             if not role_data:
-                await self._update_message(query, "❌ 角色配置错误，请联系管理员", session_id=session_id, user_message_id=user_message_id)
+                await query.answer("❌ 角色配置错误，请联系管理员")
                 return
                 
             self.logger.info(f"✅ 使用角色: {role_data.get('name', 'Unknown')} (ID: {role_data.get('role_id', 'Unknown')})")
@@ -113,21 +113,169 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             session_obj = await self.session_service.get_session(session_id)
             context_source = session_obj.get("context_source") if session_obj else None
             
-            # 4. 重新生成回复（传入上下文来源避免重复添加角色预置对话）
-            result = await self.message_service.regenerate_reply(
+            # 4. 禁用原消息按钮
+            await query.edit_message_reply_markup(reply_markup=None)
+            
+            # 5. 截断历史记录并获取用户消息内容
+            user_input = self.message_service.truncate_history_after_message(session_id, user_message_id)
+            if not user_input:
+                await query.message.reply_text("❌ 无法找到指定的用户消息")
+                return
+            
+            # 6. 发送新的初始消息
+            initial_msg = await query.message.reply_text("✍️输入中...")
+            
+            # 7. 执行流式重新生成
+            await self._execute_regenerate_stream_reply(
+                initial_msg=initial_msg,
+                role_data=role_data,
                 session_id=session_id,
-                last_message_id=user_message_id,   # ✅ 用 user_message_id 精确定位
-                ai_port=self.ai_completion_port,
-                role_data=role_data,  # ✅ 使用动态获取的角色数据
-                session_context_source=context_source  # ✅ 传入上下文来源
+                user_message_id=user_message_id,
+                user_input=user_input,
+                context_source=context_source
             )
-            reply = result["reply"]
-            await self._update_message(query, reply, session_id=session_id, user_message_id=user_message_id)
-        except TimeoutError:
-            await self._update_message(query, "⏱️ 生成超时，请重试", session_id=session_id, user_message_id=user_message_id)
+            
         except Exception as e:
             self.logger.error(f"❌ 重新生成失败: {e}")
-            await self._update_message(query, "⚠️ AI生成失败，请重试", session_id=session_id, user_message_id=user_message_id)
+            try:
+                await query.answer("❌ 重新生成失败，请重试")
+            except:
+                pass
+
+    async def _execute_regenerate_stream_reply(self, initial_msg, role_data, session_id, 
+                                             user_message_id, user_input, context_source):
+        """
+        执行重新生成专用的流式处理
+        复用StreamMessageService的核心逻辑
+        """
+        from src.domain.services.ai_completion_port import ai_completion_port
+        
+        # 获取历史记录（已截断）- 使用实例的message_service
+        history = self.message_service.get_history(session_id)
+        
+        # 流式控制参数（与StreamMessageService保持一致）
+        accumulated_text = ""
+        char_count = 0
+        first_chars_threshold = 5  # 前5个字符立即显示
+        regular_update_interval = 2.0  # 2秒间隔
+        last_update_time = 0
+        
+        # 阶段标记
+        phase = "collecting_first_chars"  # collecting_first_chars -> regular_updates -> completed
+        
+        self.logger.info(f"🚀 开始重新生成流式回复: threshold={first_chars_threshold}, interval={regular_update_interval}s")
+        
+        # 使用列表来传递引用，确保在整个方法中可访问
+        accumulated_text_ref = [accumulated_text]
+        phase_ref = [phase]
+        last_update_time_ref = [last_update_time]
+        
+        try:
+            # 使用带重试机制的流式生成
+            async for chunk in ai_completion_port.generate_reply_stream_with_retry(
+                role_data=role_data,
+                history=history,
+                user_input=user_input,
+                session_context_source=context_source
+            ):
+                # 对大块进行字符级分割处理（复用StreamMessageService的逻辑）
+                await self._process_chunk_with_granular_control(
+                    chunk=chunk,
+                    accumulated_text_ref=accumulated_text_ref,
+                    phase_ref=phase_ref,
+                    first_chars_threshold=first_chars_threshold,
+                    regular_update_interval=regular_update_interval,
+                    last_update_time_ref=last_update_time_ref,
+                    initial_msg=initial_msg
+                )
+            
+            # 从引用中获取最终值
+            accumulated_text = accumulated_text_ref[0]
+            
+            # 阶段3：立即最终更新
+            if accumulated_text:
+                try:
+                    # 添加回复键盘
+                    reply_markup = UIHandler.build_reply_keyboard(
+                        session_id=session_id,
+                        user_message_id=user_message_id
+                    )
+                    
+                    await initial_msg.edit_text(self._safe_text_for_telegram(accumulated_text), reply_markup=reply_markup)
+                    self.logger.info(f"✅ 重新生成最终更新完成: {len(accumulated_text)} 字符")
+                except Exception as e:
+                    self.logger.error(f"重新生成最终更新消息失败: {e}")
+                
+                # 保存完整回复到数据库
+                self.message_service.save_message(session_id, "assistant", accumulated_text)
+            else:
+                await initial_msg.edit_text("❌ 生成回复失败，请重试")
+                
+        except Exception as e:
+            # 详细记录错误信息
+            import traceback
+            error_details = f"类型: {type(e).__name__}, 消息: {str(e)}"
+            self.logger.error(f"重新生成流式处理失败 - {error_details}")
+            self.logger.error(f"完整堆栈:\n{traceback.format_exc()}")
+            
+            # 向用户显示更详细的错误信息
+            error_msg = str(e) if str(e) else f"{type(e).__name__} (无详细信息)"
+            await initial_msg.edit_text(f"❌ 重新生成失败: {error_msg}")
+
+    async def _process_chunk_with_granular_control(self, chunk, accumulated_text_ref, phase_ref, 
+                                                 first_chars_threshold, regular_update_interval, 
+                                                 last_update_time_ref, initial_msg):
+        """
+        对大块进行字符级分割处理，实现精细化控制
+        复用StreamMessageService的逻辑
+        """
+        import time
+        
+        # 获取当前状态
+        accumulated_text = accumulated_text_ref[0]
+        phase = phase_ref[0]
+        last_update_time = last_update_time_ref[0]
+        
+        # 逐字符处理（对于中文和英文都适用）
+        for char in chunk:
+            accumulated_text += char
+            char_count = len(accumulated_text)
+            current_time = time.time()
+            
+            if phase == "collecting_first_chars":
+                # 阶段1：收集前N个字符后立即更新
+                if char_count >= first_chars_threshold:
+                    try:
+                        await initial_msg.edit_text(self._safe_text_for_telegram(accumulated_text))
+                        phase = "regular_updates"
+                        last_update_time = current_time
+                        self.logger.info(f"📤 重新生成首段更新完成: {char_count} 字符")
+                    except Exception as e:
+                        self.logger.debug(f"重新生成首段更新失败: {e}")
+                        
+            elif phase == "regular_updates":
+                # 阶段2：每2秒更新一次
+                if current_time - last_update_time >= regular_update_interval:
+                    try:
+                        await initial_msg.edit_text(self._safe_text_for_telegram(accumulated_text))
+                        last_update_time = current_time
+                        self.logger.info(f"📤 重新生成定时更新: {char_count} 字符")
+                    except Exception as e:
+                        self.logger.debug(f"重新生成定时更新失败: {e}")
+        
+        # 更新引用
+        accumulated_text_ref[0] = accumulated_text
+        phase_ref[0] = phase
+        last_update_time_ref[0] = last_update_time
+
+    def _safe_text_for_telegram(self, text: str) -> str:
+        """Sanitize text to avoid Unicode surrogate encoding errors when sending to Telegram."""
+        try:
+            if text is None:
+                return ""
+            return text.encode('utf-8', 'ignore').decode('utf-8', 'ignore')
+        except Exception:
+            return ""
 
     @robust_callback_handler
     async def _on_new_session(self, query, context: ContextTypes.DEFAULT_TYPE):
@@ -146,7 +294,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             current_role_id = await self.session_service.get_session_role_id(current_session_id)
             if not current_role_id:
                 # 如果当前会话没有角色，使用默认角色
-                current_role_id = getattr(self.bot, 'default_role_id', '4')
+                current_role_id = getattr(self.bot, 'default_role_id', '46')
                 self.logger.info(f"📥 当前会话无角色，使用默认角色: {current_role_id}")
             
             # 2. 创建新会话，保持相同角色
@@ -260,7 +408,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 await query.answer("❌ 快照不存在或无权访问")
                 return
 
-            role_id = snap.get("role_id") or getattr(self.bot, 'default_role_id', '4')
+            role_id = snap.get("role_id") or getattr(self.bot, 'default_role_id', '46')
 
             # 2) 创建新会话并绑定角色
             new_session = await self.session_service.new_session(user_id, role_id)

@@ -251,6 +251,61 @@ class AICompletionPort:
         print(f"🤖 AI流式生成完成 | 耗时: {time.time() - start:.2f}秒 | 总chunk数: {chunk_count} | 总字符数: {total_chars}")
         print("🤖" + "="*48)
 
+    async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
+                                             max_retries=3, timeout=60, session_context_source=None) -> AsyncGenerator[str, None]:
+        """
+        带重试机制的流式生成AI回复
+        
+        Args:
+            role_data: 角色配置数据
+            history: 会话历史消息
+            user_input: 当前用户输入
+            max_retries: 最大重试次数，默认3次
+            timeout: 超时时间
+            session_context_source: 会话上下文来源标记
+            
+        Yields:
+            str: 每个流式回复片段
+        """
+        for attempt in range(max_retries):
+            try:
+                print(f"🔄 AI生成尝试 #{attempt + 1}/{max_retries}")
+                
+                # 调用原始的流式生成方法
+                async for chunk in self.generate_reply_stream(
+                    role_data=role_data,
+                    history=history,
+                    user_input=user_input,
+                    timeout=timeout,
+                    session_context_source=session_context_source
+                ):
+                    yield chunk
+                
+                # 成功生成，退出重试循环
+                print(f"✅ AI生成成功（第{attempt + 1}次尝试）")
+                return
+                
+            except Exception as e:
+                print(f"❌ AI生成失败（第{attempt + 1}次尝试）: {e}")
+                
+                if attempt == max_retries - 1:
+                    # 最后一次重试失败，返回固定话术
+                    print(f"💔 所有重试均失败，返回兜底话术")
+                    yield "抱歉，回复出现了问题，后台正在加紧修复，请耐心等待"
+                    return
+                else:
+                    # 继续重试
+                    print(f"🔄 准备进行第{attempt + 2}次重试...")
+                    continue
+
+    def _safe_for_logging(self, text: str, max_length: int = 50) -> str:
+        """安全地截断文本用于日志输出"""
+        if not text:
+            return ""
+        if len(text) <= max_length:
+            return text
+        return text[:max_length] + "..."
+
 
 # ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
 # 注意：这个实例在初始化时会报错，因为没有提供 gpt_caller

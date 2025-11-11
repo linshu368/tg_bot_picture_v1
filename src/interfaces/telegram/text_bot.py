@@ -48,7 +48,7 @@ class TextBot:
         self.snapshot_service = snapshot_service
         self.session_service = session_service
         
-        self.default_role_id = "4" #默认角色ID
+        self.default_role_id = "46" #默认角色ID
         # 从环境变量读取角色频道URL，根据MODE选择默认值
         mode = os.getenv("MODE", "staging")
         default_role_url = "https://t.me/ai_role_list" if mode == "production" else "https://t.me/ai_role_list_test"
