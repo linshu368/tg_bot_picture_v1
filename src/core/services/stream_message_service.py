@@ -235,9 +235,23 @@ class StreamMessageService:
         limit_check = await message_service.check_daily_limit(user_id)
         if not limit_check["allowed"]:
             self.logger.warning(f"🚫 用户超出每日消息限制: user_id={user_id}, current_count={limit_check['current_count']}, limit={limit_check['limit']}")
+            
+            # 获取或创建会话（用于保存限制提示消息）
+            session = await session_service.get_or_create_session(user_id)
+            session_id = session["session_id"]
+            
+            # 保存用户消息
+            user_message_id = message_service.save_message(session_id, "user", content)
+            
+            # 保存Bot的限制提示回复
+            limit_message = "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！"
+            bot_message_id = message_service.save_message(session_id, "assistant", limit_message)
+            
+            self.logger.info(f"💾 已保存限制提示消息: user_message_id={user_message_id}, bot_message_id={bot_message_id}")
+            
             return {
                 "code": 4003, 
-                "message": "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！", 
+                "message": limit_message, 
                 "data": None
             }
 

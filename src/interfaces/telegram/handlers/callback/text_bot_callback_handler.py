@@ -91,7 +91,13 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             limit_check = await self.message_service.check_daily_limit(user_id)
             if not limit_check["allowed"]:
                 self.logger.warning(f"🚫 用户重新生成超出每日限制: user_id={user_id}, current_count={limit_check['current_count']}, limit={limit_check['limit']}")
-                await query.answer("您今日的免费体验次数已用完，明日0点重置。感谢您的使用！", show_alert=True)
+                
+                # 保存Bot的限制提示回复到数据库
+                limit_message = "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！"
+                bot_message_id = self.message_service.save_message(session_id, "assistant", limit_message)
+                self.logger.info(f"💾 已保存重新生成限制提示消息: bot_message_id={bot_message_id}")
+                
+                await query.answer(limit_message, show_alert=True)
                 return
             
             # 2. 从会话获取绑定的角色ID
