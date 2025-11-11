@@ -37,6 +37,9 @@ structlog==23.2.0
 rich==14.1.0
 sentry-sdk==2.38.0
 
+# ---- 数据分析与监控 ----
+posthog==3.7.4
+
 # ---- FastAPI 支持库 ----
 starlette==0.48.0
 # python-multipart==0.0.20  # 主要用于处理图片上传的multipart/form-data - 仅图片bot使用
