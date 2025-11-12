@@ -89,13 +89,13 @@ class MessageService:
             self.logger.error(f"❌ 获取用户消息数量失败: {e}")
             return 0
     
-    async def check_daily_limit(self, user_id: str, daily_limit: int = 40) -> dict:
+    async def check_daily_limit(self, user_id: str, daily_limit: int = None) -> dict:
         """
         检查用户今日消息数量是否超过限制
         
         Args:
             user_id: 用户ID
-            daily_limit: 每日限制数量，默认40条
+            daily_limit: 每日限制数量，None时从配置读取
             
         Returns:
             dict: {
@@ -105,6 +105,16 @@ class MessageService:
                 "remaining": int  # 剩余数量
             }
         """
+        # 如果没有传入daily_limit，从配置中读取
+        if daily_limit is None:
+            try:
+                from src.utils.config.settings import get_settings
+                settings = get_settings()
+                daily_limit = settings.daily_limit
+            except Exception as e:
+                self.logger.error(f"❌ 无法读取配置中的daily_limit，请检查环境变量DAILY_LIMIT是否设置: {e}")
+                raise ValueError("DAILY_LIMIT环境变量未设置或配置错误")
+        
         try:
             if self.message_repository is None:
                 # 无数据库连接时，默认允许

@@ -75,6 +75,7 @@ class AppSettings:
     payment: PaymentSettings
     credit: CreditSettings
     services: ServicesSettings  # 🔧 V2迁移：添加服务配置
+    daily_limit: int  # 每日消息限制数量（必须从环境变量DAILY_LIMIT读取）
     
     # 积分包配置
     credit_packages: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -129,7 +130,8 @@ def get_settings() -> AppSettings:
         database=database_config,
         credit=credit_config,
         payment=payment_config,
-        services=services_config
+        services=services_config,
+        daily_limit=int(os.getenv("DAILY_LIMIT"))  # 从环境变量读取每日限制（必须设置）
     ) 
 
 
