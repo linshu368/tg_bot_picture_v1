@@ -154,17 +154,24 @@ def setup_container(settings) -> Container:
     
     container.register_factory("message_service", message_service_factory)
     
-    # 注册GPT调用器
-    def gpt_caller_factory(c):
+    # 注册AI调用器（Grok 与 Novel）
+    def grok_caller_factory(c):
+        from demo.grok_async import AsyncGrokCaller
+        return AsyncGrokCaller()
+    container.register_factory("grok_caller", grok_caller_factory)
+
+    def novel_caller_factory(c):
         from demo.novel_async import AsyncNovelCaller
         return AsyncNovelCaller()
-    
-    container.register_factory("gpt_caller", gpt_caller_factory)
+    container.register_factory("novel_caller", novel_caller_factory)
     
     # 注册AI完成端口服务
     def ai_completion_port_factory(c):
         from src.domain.services.ai_completion_port import AICompletionPort
-        return AICompletionPort(c.get("gpt_caller"))
+        return AICompletionPort(
+            grok_caller=c.get("grok_caller"),
+            novel_caller=c.get("novel_caller")
+        )
     
     container.register_factory("ai_completion_port", ai_completion_port_factory)
     

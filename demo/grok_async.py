@@ -1,4 +1,3 @@
-# api_async.py - 异步版本的GPTCaller
 import aiohttp
 import asyncio
 import os
@@ -11,32 +10,28 @@ project_root = Path(__file__).parent.parent
 env_path = project_root / '.env'
 load_dotenv(env_path)
 
-class AsyncGPTCaller:
+class AsyncGrokCaller:
     def __init__(self, api_key=None, api_url=None):
-        self.api_key = api_key or os.getenv("TEXT_OPENAI_API_KEY")
-        self.url = api_url or os.getenv("TEXT_OPENAI_API_URL")
+        self.api_key = api_key or os.getenv("GROK_API_KEY")
+        self.url = api_url or os.getenv("GROK_API_URL")
         self.headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
         }
 
-    async def get_stream_response(self, messages, model_name=None, timeout=60, debug=False):
+    async def get_stream_response(self, messages, model=None, timeout=60, debug=False):
         """
-        调用 OpenAI API 流式生成响应 (异步版本)
+        调用 GROK API 流式生成响应 (异步版本)
         """
         import time
         
         if not self.api_key:
-            raise ValueError("API密钥未设置，请设置TEXT_OPENAI_API_KEY环境变量")
+            raise ValueError("API密钥未设置，请设置GROK_API_KEY环境变量")
         
-        model = model_name or os.getenv("TEXT_OPENAI_MODEL", "")
-        if not model:
-            raise ValueError("模型未设置，请设置TEXT_OPENAI_MODEL环境变量或在调用时传入model_name参数")
-            
         data = {
-            'model': model,
             'messages': messages,
-            'stream': True  # 启用流式返回
+            'stream': True,  # 启用流式返回
+            'model': model   # 模型参数从外部传入
         }
 
         # 创建超时配置
@@ -66,7 +61,7 @@ class AsyncGPTCaller:
                 first_byte_received = False
                 chunk_count = 0
                 
-                # 逐块读取流式数据 (OpenAI SSE 格式)
+                # 逐块读取流式数据 (GROK 流式响应格式)
                 async for line in response.content:
                     if not line:
                         continue
@@ -80,7 +75,7 @@ class AsyncGPTCaller:
                     # 解码
                     line_str = line.decode('utf-8').strip()
                     
-                    # OpenAI 流式响应格式: "data: {...}"
+                    # GROK 流式响应格式: "data: {...}"
                     if line_str.startswith('data: '):
                         data_str = line_str[6:]  # 去掉 "data: " 前缀
                         
@@ -114,21 +109,17 @@ class AsyncGPTCaller:
                     total_time = time.time() - request_start
                     print(f"[API] 总耗时: {total_time:.3f}秒, 共{chunk_count}个chunk")
 
-    async def get_response(self, messages, model_name=None, timeout=60):
+    async def get_response(self, messages, model=None, timeout=60):
         """
         非流式版本 - 获取完整响应
         """
         if not self.api_key:
-            raise ValueError("API密钥未设置，请设置TEXT_OPENAI_API_KEY环境变量")
-        
-        model = model_name or os.getenv("TEXT_OPENAI_MODEL", "")
-        if not model:
-            raise ValueError("模型未设置，请设置TEXT_OPENAI_MODEL环境变量或在调用时传入model_name参数")
+            raise ValueError("API密钥未设置，请设置GROK_API_KEY环境变量")
         
         data = {
-            'model': model,
             'messages': messages,
-            'stream': False
+            'stream': False,
+            'model': model  # 模型参数从外部传入
         }
 
         timeout_config = aiohttp.ClientTimeout(total=timeout)
@@ -143,3 +134,13 @@ class AsyncGPTCaller:
                     raise ValueError("API响应中没有choices")
                 
                 return choices[0].get('message', {}).get('content', '')
+
+
+# 为了方便使用，提供一个简单的异步生成器函数
+async def chat_with_grok_async(messages, api_key=None, model_name=None, debug=False):
+    """
+    简化的异步生成器函数，用于流式对话
+    """
+    caller = AsyncGrokCaller(api_key=api_key)
+    async for content in caller.get_stream_response(messages, model=model_name, debug=debug):
+        yield content

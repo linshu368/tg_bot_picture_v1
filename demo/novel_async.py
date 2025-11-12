@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 
-# 加载.env文件 - 从父目录加载（与 gemini_async.py 一致）
+# 加载.env文件 - 从父目录加载
 project_root = Path(__file__).parent.parent
 env_path = project_root / '.env'
 load_dotenv(env_path)
@@ -16,7 +16,8 @@ load_dotenv(env_path)
 class AsyncNovelCaller:
     """
     使用商家原生流式（SSE）协议的异步调用器。
-    接口与 AsyncGeminiCaller 对齐：
+    模型配置从NOVEL_MODEL环境变量读取。
+    提供标准的AI API调用接口：
       - get_stream_response(messages, model_name=None, timeout=60, debug=False)
       - get_response(messages, model_name=None, timeout=60, debug=False)
     """
@@ -24,11 +25,9 @@ class AsyncNovelCaller:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        default_model: Optional[str] = None,
         base_url: Optional[str] = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("NOVEL_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-        self.default_model = default_model or os.getenv("NOVEL_MODEL", os.getenv("GEMINI_MODEL", "nalang-xl-0826-10k"))
+        self.api_key = api_key or os.getenv("NOVEL_API_KEY", "")
         # 注意：为商家接口设置默认基础URL
         self.base_url = base_url or os.getenv(
             "NOVEL_BASE_URL",
@@ -49,7 +48,9 @@ class AsyncNovelCaller:
         """
         原生SSE流式生成：逐行解析 `data: {json}`，从 `choices[0].delta.content` 增量输出。
         """
-        model = model_name or self.default_model
+        model = model_name or os.getenv("NOVEL_MODEL", "")
+        if not model:
+            raise ValueError("模型未设置，请设置NOVEL_MODEL环境变量或在调用时传入model_name参数")
         url = self.base_url.rstrip('/') + '/chat/completions'
 
         headers = {

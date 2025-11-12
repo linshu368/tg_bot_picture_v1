@@ -1,90 +1,51 @@
 # main_async.py - 异步流式回复测试版本
 import asyncio
 import time
-import sys
-import json
-import aiohttp
+import os
 from role import role_data
+from grok_async import chat_with_grok_async
 
 conversation_history = []
 
+
 async def chat_with_ai_async(messages, api_key, model_name, debug=False):
-    """
-    使用与test1.py相同的方式异步调用API
-    """
-    url = "https://www.gpt4novel.com/api/xiaoshuoai/ext/v1/chat/completions"
-    
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {api_key}',
-    }
-    
-    # 构建请求体 - 与test1.py完全相同
-    request_body = {
-        'model': model_name,
-        'messages': messages,
-        'stream': True,
-        'temperature': 0.7,
-        'max_tokens': 800,
-        'top_p': 0.35,
-        'repetition_penalty': 1.05,
-    }
-    
+    """使用grok_async.py中的函数调用API"""
     if debug:
-        print(f"[API] 发起请求到: {url}")
+        print(f"[API] 使用Grok API")
         print(f"[API] 使用模型: {model_name}")
         print(f"[API] 消息数量: {len(messages)}")
     
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=request_body) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise ValueError(f"HTTP error! status: {response.status}, response: {error_text}")
-                
-                if debug:
-                    print(f"[API] 请求成功，开始读取流...")
-                
-                # 处理流响应
-                buffer = ''
-                async for chunk in response.content.iter_chunked(1024):
-                    if chunk:
-                        decoded_chunk = chunk.decode('utf-8')
-                        buffer += decoded_chunk
-                        
-                        # 按行处理数据 - 处理SSE格式
-                        while '\n' in buffer:
-                            line, buffer = buffer.split('\n', 1)
-                            if line.strip():
-                                try:
-                                    # 处理SSE格式：去掉 "data: " 前缀
-                                    if line.strip().startswith('data: '):
-                                        json_str = line.strip()[6:]  # 去掉 "data: " 前缀
-                                        if json_str.strip():  # 确保不是空字符串
-                                            json_data = json.loads(json_str)
-                                            if 'choices' in json_data:
-                                                content = json_data['choices'][0].get('delta', {}).get('content', '')
-                                                if content:
-                                                    yield content
-                                except json.JSONDecodeError:
-                                    if debug:
-                                        print(f"[API] 无法解析数据：{line.strip()}")
-                                    continue
-                                    
+        # 直接调用grok_async.py中的函数，传入模型名称
+        async for content in chat_with_grok_async(messages, api_key, model_name, debug=debug):
+            yield content
+                    
     except Exception as e:
         if debug:
             print(f"[API] 请求失败: {str(e)}")
         raise ValueError(f"API请求失败: {str(e)}")
 
+
 def build_messages(user_input):
+    """构建消息列表"""
     messages = []
+    
+    # 添加系统提示
     if "system_prompt" in role_data:
         messages.append({"role": "system", "content": role_data["system_prompt"]})
+    
+    # 添加历史记录
     if "history" in role_data:
         messages.extend(role_data["history"])
+    
+    # 添加对话历史
     messages.extend(conversation_history)
+    
+    # 添加用户输入
     messages.append({"role": "user", "content": user_input})
+    
     return messages
+
 
 async def granular_stream_display(api_key, messages, model_name, debug=False):
     """
@@ -183,30 +144,39 @@ async def granular_stream_display(api_key, messages, model_name, debug=False):
         print(f"\n❌ 流式显示错误: {e}")
         raise
 
+
 async def collect_full_response(api_key, messages, model_name, debug=False):
     """收集完整响应用于保存到历史记录"""
     full_response = ""
     try:
-        async for chunk in chat_with_ai_async(messages, api_key, model_name, debug=False):  # 收集时不打印debug日志
+        async for chunk in chat_with_ai_async(messages, api_key, model_name, debug=False):
             full_response += chunk
         return full_response
     except Exception as e:
         print(f"❌ 收集响应错误: {e}")
         return ""
 
+
 async def main():
-    # 🔧 API配置 - 直接使用test1.py中成功的配置
-    API_KEY = "a80bb032-61d7-4a6a-8271-11f5aadc47f8"  # 你的API密钥
-    MODEL_NAME = "nalang-xl-0826-10k"  # 你的模型名称
+    # 🔧 API配置 - 从环境变量读取
+    API_KEY = os.getenv("GROK_API_KEY")
+    MODEL_NAME = os.getenv("GROK_MODEL_NAME", "grok-4-fast-non-reasoning")  # 默认模型
+    
+    # 检查API密钥是否设置
+    if not API_KEY:
+        print("❌ 错误: 请设置 GROK_API_KEY 环境变量")
+        print("💡 提示: 在 .env 文件中添加: GROK_API_KEY=你的API密钥")
+        return
     
     # 🔍 设置调试模式
     DEBUG_MODE = True  # 改为False可关闭API详细日志
     
     print(f"🎭 当前角色: {role_data['name']}")
     print(f"📝 角色介绍: {role_data['summary']}")
-    print(f"🤖 使用模型: {role_data.get('model')}")
+    print(f"🤖 使用模型: {role_data.get('model', MODEL_NAME)}")
+    print(f"🔑 API密钥: {API_KEY[:10]}...{API_KEY[-10:] if API_KEY else '未设置'}")
     print(f"🔍 调试模式: {'开启' if DEBUG_MODE else '关闭'}")
-    print("="*50)
+    print("=" * 50)
 
     while True:
         user_input = input("\n👤 你: ")
@@ -216,7 +186,7 @@ async def main():
 
         messages = build_messages(user_input)
 
-        # 👇 使用角色指定的模型（若没写，就用默认）
+        # 👇 使用角色指定的模型（若没写，就用环境变量或默认模型）
         model_name = role_data.get("model", MODEL_NAME)
 
         # ✅ 精细化流式输出 - 5字符立即显示，然后每2秒更新
@@ -233,6 +203,7 @@ async def main():
         # 保存到对话历史
         conversation_history.append({"role": "user", "content": user_input})
         conversation_history.append({"role": "assistant", "content": full_response})
+
 
 if __name__ == "__main__":
     asyncio.run(main())

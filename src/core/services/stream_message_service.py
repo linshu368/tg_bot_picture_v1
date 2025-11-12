@@ -158,7 +158,11 @@ class StreamMessageService:
                 # 保存完整回复到数据库
                 message_service.save_message(session_id, "assistant", accumulated_text)
             else:
-                await initial_msg.edit_text("❌ 生成回复失败，请重试")
+                # 流式处理完成但无内容，记录详细错误信息
+                self.logger.error(f"❌ 流式处理完成但无内容: session_id={session_id}, user_message_id={user_message_id}")
+                self.logger.error(f"❌ 原始用户输入: {content}")
+                self.logger.error(f"❌ 角色数据: role_id={role_data.get('id', 'unknown') if role_data else 'None'}")
+                await initial_msg.edit_text("抱歉，回复出现了问题，后台正在加紧修复，请耐心等待")
                 
         except Exception as e:
             # 详细记录错误信息

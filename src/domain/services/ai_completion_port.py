@@ -1,11 +1,15 @@
 #AI纯生成器，不涉及任何业务逻辑，应放入GPT/
 import time
 import random
+import os
 from typing import Optional, Callable, AsyncGenerator
+from demo.grok_async import AsyncGrokCaller
+from demo.novel_async import AsyncNovelCaller
 
 class AICompletionPort:
-    def __init__(self, gpt_caller):
-        self.gpt = gpt_caller
+    def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None):
+        self.grok = grok_caller
+        self.novel = novel_caller
         # 前3轮对话的增强指令模板
         self.early_conversation_instruction = (
             "##用户信息:{user_context}\n"
@@ -36,7 +40,7 @@ class AICompletionPort:
         except Exception:
             return "<unprintable>"
 
-    async def generate_reply(self, role_data, history, user_input, timeout=60, session_context_source=None, on_partial_reply: Optional[Callable[[str], None]] = None):
+    async def generate_reply(self, role_data, history, user_input, timeout=60, session_context_source=None, on_partial_reply: Optional[Callable[[str], None]] = None, caller: Optional[object] = None, model_name: Optional[str] = None):
         """
         生成AI回复
         
@@ -121,8 +125,14 @@ class AICompletionPort:
         # 收集完整回复
         full_response = ""
         
-        # 调用异步流式 GPT API
-        async for partial_reply in self.gpt.get_stream_response(messages, model_name=role_data.get("model"), timeout=timeout):
+        # 选择调用器与模型
+        use_caller = caller or self._select_default_caller()
+        use_model = model_name
+        if use_caller is None:
+            raise RuntimeError("未配置任何可用的AI调用器（Grok/Novel）")
+
+        # 调用异步流式 API（模型用位置参数以兼容不同签名）
+        async for partial_reply in use_caller.get_stream_response(messages, use_model, timeout=timeout):
             full_response += partial_reply
             
             # 如果提供了回调函数，逐步调用它来处理部分回复
@@ -178,7 +188,7 @@ class AICompletionPort:
         print(f"✨ 用户消息已增强 | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
         return enhanced_content
 
-    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None) -> AsyncGenerator[str, None]:
+    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None) -> AsyncGenerator[str, None]:
         """
         流式生成AI回复 - 返回异步生成器，用于Telegram Bot的流式更新
         
@@ -241,7 +251,13 @@ class AICompletionPort:
         # 流式生成并逐步返回
         chunk_count = 0
         total_chars = 0
-        async for partial_reply in self.gpt.get_stream_response(messages, model_name=role_data.get("model"), timeout=timeout):
+        # 选择调用器与模型
+        use_caller = caller or self._select_default_caller()
+        use_model = model_name
+        if use_caller is None:
+            raise RuntimeError("未配置任何可用的AI调用器（Grok/Novel）")
+
+        async for partial_reply in use_caller.get_stream_response(messages, use_model, timeout=timeout):
             chunk_count += 1
             total_chars += len(partial_reply)
             safe_chunk_preview = self._safe_for_logging(partial_reply, 50)
@@ -271,24 +287,42 @@ class AICompletionPort:
         for attempt in range(max_retries):
             try:
                 print(f"🔄 AI生成尝试 #{attempt + 1}/{max_retries}")
-                
-                # 调用原始的流式生成方法
+
+                # 前两次使用 Grok，第三次使用 Novel
+                if attempt < 2:
+                    if not self.grok:
+                        raise RuntimeError("Grok 调用器未配置")
+                    provider = "Grok"
+                    caller = self.grok
+                    model_env = os.getenv("GROK_MODEL")
+                else:
+                    if not self.novel:
+                        raise RuntimeError("Novel 调用器未配置")
+                    provider = "Novel"
+                    caller = self.novel
+                    model_env = os.getenv("NOVEL_MODEL")
+
+                print(f"🚀 本次尝试使用提供方: {provider} | 模型: {model_env}")
+
+                # 使用统一的超时策略（两边 caller 都使用 total=timeout）
                 async for chunk in self.generate_reply_stream(
                     role_data=role_data,
                     history=history,
                     user_input=user_input,
                     timeout=timeout,
-                    session_context_source=session_context_source
+                    session_context_source=session_context_source,
+                    caller=caller,
+                    model_name=model_env
                 ):
                     yield chunk
-                
+
                 # 成功生成，退出重试循环
-                print(f"✅ AI生成成功（第{attempt + 1}次尝试）")
+                print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
                 return
-                
+
             except Exception as e:
                 print(f"❌ AI生成失败（第{attempt + 1}次尝试）: {e}")
-                
+
                 if attempt == max_retries - 1:
                     # 最后一次重试失败，返回固定话术
                     print(f"💔 所有重试均失败，返回兜底话术")
@@ -306,6 +340,17 @@ class AICompletionPort:
         if len(text) <= max_length:
             return text
         return text[:max_length] + "..."
+
+    def _select_default_caller(self) -> Optional[object]:
+        """
+        选择一个默认可用的调用器：
+        优先 Novel，其次 Grok；如果都不存在则返回 None
+        """
+        if self.novel:
+            return self.novel
+        if self.grok:
+            return self.grok
+        return None
 
 
 # ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
