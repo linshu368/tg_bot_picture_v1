@@ -34,8 +34,11 @@ class MessageService:
         
         # 异步写入Supabase（如果配置了message_repository）
         if self.message_repository and self.session_service:
-            # 在后台异步执行，不阻塞主流程
-            asyncio.create_task(self._async_save_to_supabase(session_id, role, content, message_id))
+            # 只保存机器人消息，用户消息等AI处理完成后带指令一起保存
+            # 这样避免重复保存：一次不带指令，一次带指令
+            if role == "assistant":  # 机器人消息立即保存
+                asyncio.create_task(self._async_save_to_supabase(session_id, role, content, message_id))
+            # 用户消息不在这里保存，等AI处理完成后通过save_user_message_with_real_instructions_async保存
         
         return message_id
     
