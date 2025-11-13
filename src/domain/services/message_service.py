@@ -305,6 +305,50 @@ class MessageService:
 
         return user_input
 
+    def restore_history_to_memory(self, session_id: str, messages: List[Dict[str, str]]) -> int:
+        """
+        仅在内存中恢复历史消息（用于快照会话），不保存到数据库
+        
+        Args:
+            session_id: 会话ID
+            messages: 历史消息列表 [{"role": "user/assistant", "content": "..."}]
+            
+        Returns:
+            恢复的消息数量
+        """
+        if not messages:
+            return 0
+        
+        # 生成消息ID并构造内存格式
+        restored_messages = []
+        for m in messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            
+            if role and content:
+                message_id = uuid.uuid4().hex[:8]
+                message_data = {
+                    "message_id": message_id,
+                    "role": role,
+                    "content": content
+                }
+                restored_messages.append(message_data)
+        
+        # 直接写入内存存储，不触发数据库保存
+        self._store[session_id] = restored_messages
+        
+        self.logger.info(f"🔄 快照历史已恢复到内存: session_id={session_id}, count={len(restored_messages)}")
+        print(f"🔄 快照历史恢复 | Session: {session_id} | 恢复消息数: {len(restored_messages)}")
+        print("📋 恢复的消息:")
+        for i, msg in enumerate(restored_messages):
+            role_emoji = "👤" if msg["role"] == "user" else "🤖"
+            print(f"  [{i+1}] {role_emoji} {msg['role']} (ID: {msg['message_id']})")
+            content_preview = msg['content'][:100] + "..." if len(msg['content']) > 100 else msg['content']
+            print(f"      📝 {content_preview}")
+        print("🔄" + "="*48)
+        
+        return len(restored_messages)
+
 
 # ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
 # 在应用启动时，应该通过容器创建并替换这个实例

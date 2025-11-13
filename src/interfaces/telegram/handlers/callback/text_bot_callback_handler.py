@@ -466,12 +466,9 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             new_session_id = new_session["session_id"]
 
             # 3) 预置历史消息（快照中的 messages 已包含预置与实际）
+            # 🔄 只在内存中恢复历史，不保存到数据库（避免重复记录）
             messages = snap.get("messages", [])
-            for m in messages:
-                role = m.get("role", "")
-                content = m.get("content", "")
-                if role and content:
-                    self.message_service.save_message(new_session_id, role, content)
+            restored_count = self.message_service.restore_history_to_memory(new_session_id, messages)
 
             # 4) 写入会话上下文覆写（MVP：直接附加到会话字典）
             session_obj = await self.session_service.get_session(new_session_id)
