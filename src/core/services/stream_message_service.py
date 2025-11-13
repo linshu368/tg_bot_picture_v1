@@ -157,6 +157,37 @@ class StreamMessageService:
                 
                 # 保存完整回复到数据库
                 message_service.save_message(session_id, "assistant", accumulated_text)
+                
+                # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令）
+                if message_service.message_repository and hasattr(message_service, 'session_service'):
+                    try:
+                        used_instructions = ai_completion_port.get_last_used_instructions()
+                        system_instructions = used_instructions.get("system_instructions")
+                        ongoing_instructions = used_instructions.get("ongoing_instructions")
+                        
+                        if system_instructions or ongoing_instructions:
+                            # 获取session_id中的user_id和role_id
+                            try:
+                                session_info = await message_service._get_session_info(session_id)
+                                if session_info:
+                                    user_id = session_info.get("user_id")
+                                    role_id = session_info.get("role_id")
+                                    
+                                    if user_id:
+                                        # 异步保存带指令的用户消息（不阻塞主流程）
+                                        message_service.message_repository.save_user_message_with_real_instructions_async(
+                                            user_id=str(user_id),
+                                            role_id=str(role_id) if role_id else None,
+                                            session_id=session_id,
+                                            message=content,
+                                            system_instructions=system_instructions,
+                                            ongoing_instructions=ongoing_instructions
+                                        )
+                                        self.logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}")
+                            except Exception as inner_e:
+                                self.logger.error(f"❌ 获取会话信息失败: {inner_e}")
+                    except Exception as e:
+                        self.logger.error(f"❌ 保存带指令的用户消息失败: {e}")
             else:
                 # 流式处理完成但无内容，记录详细错误信息
                 self.logger.error(f"❌ 流式处理完成但无内容: session_id={session_id}, user_message_id={user_message_id}")

@@ -253,6 +253,32 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
             session_context_source=context_source
         ):
             reply += chunk
+            
+        # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令）
+        if message_service.message_repository:
+            try:
+                used_instructions = ai_completion_port.get_last_used_instructions()
+                system_instructions = used_instructions.get("system_instructions")
+                ongoing_instructions = used_instructions.get("ongoing_instructions")
+                
+                if system_instructions or ongoing_instructions:
+                    # 获取会话信息
+                    session_info = await session_service.get_session(user_id)
+                    if session_info:
+                        role_id_for_save = session_info.get("role_id")
+                        # 异步保存带指令的用户消息（不阻塞主流程）
+                        message_service.message_repository.save_user_message_with_real_instructions_async(
+                            user_id=str(user_id),
+                            role_id=str(role_id_for_save) if role_id_for_save else None,
+                            session_id=session_id,
+                            message=content,
+                            system_instructions=system_instructions,
+                            ongoing_instructions=ongoing_instructions
+                        )
+                        logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}")
+            except Exception as e:
+                logger.error(f"❌ 保存带指令的用户消息失败: {e}")
+                
     except TimeoutError:
         return envelope_error(4004, "生成超时，请重试")
     except Exception as e:

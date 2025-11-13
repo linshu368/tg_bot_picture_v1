@@ -221,8 +221,46 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 
                 # 保存完整回复到数据库
                 self.message_service.save_message(session_id, "assistant", accumulated_text)
+                
+                # 🆕 AI重新生成完成后，获取实际使用的指令并保存用户消息（带指令）
+                if self.message_service.message_repository and hasattr(self.message_service, 'session_service'):
+                    try:
+                        from src.domain.services.ai_completion_port import ai_completion_port
+                        used_instructions = ai_completion_port.get_last_used_instructions()
+                        system_instructions = used_instructions.get("system_instructions")
+                        ongoing_instructions = used_instructions.get("ongoing_instructions")
+                        
+                        if system_instructions or ongoing_instructions:
+                            # 获取session_id中的user_id和role_id
+                            try:
+                                session_info = await self.message_service._get_session_info(session_id)
+                                if session_info:
+                                    user_id = session_info.get("user_id")
+                                    role_id = session_info.get("role_id")
+                                    
+                                    if user_id:
+                                        # 异步保存带指令的用户消息（不阻塞主流程）
+                                        self.message_service.message_repository.save_user_message_with_real_instructions_async(
+                                            user_id=str(user_id),
+                                            role_id=str(role_id) if role_id else None,
+                                            session_id=session_id,
+                                            message=user_input,
+                                            system_instructions=system_instructions,
+                                            ongoing_instructions=ongoing_instructions
+                                        )
+                                        self.logger.info(f"🔄 已异步保存带指令的用户消息(重新生成): session_id={session_id}")
+                            except Exception as inner_e:
+                                self.logger.error(f"❌ 获取会话信息失败(重新生成): {inner_e}")
+                    except Exception as e:
+                        self.logger.error(f"❌ 保存带指令的用户消息失败(重新生成): {e}")
             else:
-                await initial_msg.edit_text("❌ 生成回复失败，请重试")
+                # 重新生成完成但无内容，记录详细错误信息
+                self.logger.error(f"❌ 重新生成完成但无内容: session_id={session_id}, user_message_id={user_message_id}")
+                self.logger.error(f"❌ 原始用户输入: {user_input}")
+                self.logger.error(f"❌ 角色数据: role_id={role_data.get('id', 'unknown') if role_data else 'None'}")
+                self.logger.error(f"❌ 上下文来源: {context_source}")
+                # 向用户显示统一的友好错误信息
+                await initial_msg.edit_text("抱歉，回复出现了问题，后台正在加紧修复，请耐心等待")
                 
         except Exception as e:
             # 详细记录错误信息
