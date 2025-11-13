@@ -15,6 +15,12 @@ class AICompletionPort:
             "##用户信息:{user_context}\n"
             "##系统指令：以下为最高优先级指令。\n"
             "{system_instructions}"
+        )
+        # 第4轮及以后对话的持续指令模板
+        self.ongoing_conversation_instruction = (
+            "##用户信息:{user_context}\n"
+            "##持续指令：\n"
+            "{ongoing_instructions}"
         )   
 
 
@@ -34,115 +40,6 @@ class AICompletionPort:
         except Exception:
             return "<unprintable>"
 
-    async def generate_reply(self, role_data, history, user_input, timeout=60, session_context_source=None, on_partial_reply: Optional[Callable[[str], None]] = None, caller: Optional[object] = None, model_name: Optional[str] = None):
-        """
-        生成AI回复
-        
-        Args:
-            role_data: 角色配置数据
-            history: 会话历史消息
-            user_input: 当前用户输入
-            timeout: 超时时间
-            session_context_source: 会话上下文来源标记，"snapshot" 表示来自快照会话
-        
-        说明：
-            - 常规会话: system_prompt + role_data.history + MessageService历史
-            - 快照会话: system_prompt + MessageService历史（已含快照完整上下文，跳过role_data.history避免重复）
-        """
-        # 打印输入的历史记录
-        print(f"🧠 AI生成回复 | 输入历史记录数量: {len(history)} | 上下文来源: {session_context_source or '常规'}")
-        if history:
-            print("📜 输入历史记录:")
-            for i, msg in enumerate(history):
-                role_emoji = "👤" if msg["role"] == "user" else "🤖"
-                print(f"  [{i+1}] {role_emoji} {msg['role']}")
-                # 限制内容长度并进行安全日志处理
-                safe_preview = self._safe_for_logging(msg.get('content', ''), 80)
-                print(f"      📝 {safe_preview}")
-        else:
-            print("📜 输入历史记录为空")
-
-        # 构建 prompt
-        messages = []
-        
-        # 1. 添加 system_prompt
-        if "system_prompt" in role_data:
-            messages.append({"role": "system", "content": role_data["system_prompt"]})
-        
-        # 2. 仅在非快照会话时添加角色预置 history（避免重复）
-        if session_context_source != "snapshot" and "history" in role_data:
-            messages.extend(role_data["history"])
-            print(f"✅ 添加角色预置对话: {len(role_data.get('history', []))} 条")
-        elif session_context_source == "snapshot":
-            print(f"⏭️ 跳过角色预置对话（快照会话已包含完整上下文）")
-        
-        # 3. 添加实际会话历史
-        messages.extend(history)
-        # 注意：不再额外添加 user_input，因为它已经在 history 中了
-        
-        # 🆕 4. 前3轮对话增强指令逻辑
-        user_turn_count = self._count_real_user_turns(history)
-        if user_turn_count <= 3 and messages:
-            last_user_msg_index = self._find_last_user_message_index(messages)
-            if last_user_msg_index is not None:
-                # 增强最后一条用户消息
-                original_content = messages[last_user_msg_index]["content"]
-                enhanced_content = self._enhance_user_message_with_instruction(
-                    original_content, 
-                    f"第{user_turn_count}轮对话"
-                )
-                messages[last_user_msg_index]["content"] = enhanced_content
-                print(f"✅ 已为第{user_turn_count}轮对话添加增强指令")
-        elif user_turn_count > 3:
-            print(f"⏭️ 跳过指令增强（已超过3轮）: 当前第{user_turn_count}轮")
-
-        # 打印构建的完整消息列表
-        print(f"🔧 构建完整消息列表 | 总消息数: {len(messages)}")
-        print("📋 完整消息列表:")
-        for i, msg in enumerate(messages):
-            role_emoji = {"system": "⚙️", "user": "👤", "assistant": "🤖"}.get(msg["role"], "❓")
-            print(f"  [{i+1}] {role_emoji} {msg['role']}")
-            safe_preview = self._safe_for_logging(msg.get('content', ''), 80)
-            print(f"      📝 {safe_preview}")
-        
-        print(f"👤 当前用户输入: {self._safe_for_logging(user_input, 200)}")
-        print("🧠" + "="*48)
-
-        # 模拟超时
-        # （这里应该在 GPTCaller 层做真正的 async 超时控制，这里先简化）
-        if random.random() < 0.01:
-            raise TimeoutError("4004: 生成超时")
-
-        # 开始计时：从调用GPT API开始
-        start = time.time()
-        
-        # 收集完整回复
-        full_response = ""
-        
-        # 选择调用器与模型
-        use_caller = caller or self._select_default_caller()
-        use_model = model_name
-        if use_caller is None:
-            raise RuntimeError("未配置任何可用的AI调用器（Grok/Novel）")
-
-        # 调用异步流式 API（模型用位置参数以兼容不同签名）
-        async for partial_reply in use_caller.get_stream_response(messages, use_model, timeout=timeout):
-            full_response += partial_reply
-            
-            # 如果提供了回调函数，逐步调用它来处理部分回复
-            if on_partial_reply:
-                if callable(on_partial_reply):
-                    # 同步回调
-                    on_partial_reply(partial_reply)
-                else:
-                    # 异步回调
-                    await on_partial_reply(partial_reply)
-
-        # 结束流式生成
-        print(f"🤖 AI生成回复完成 | 耗时: {time.time() - start:.2f}秒 | 总字符数: {len(full_response)}")
-        print("🤖" + "="*48)
-        
-        return full_response
 
     def _count_real_user_turns(self, history):
         """
@@ -165,24 +62,37 @@ class AICompletionPort:
         print("⚠️ 未找到用户消息")
         return None
     
-    def _enhance_user_message_with_instruction(self, original_content, user_context="当前对话"):
+    def _enhance_user_message_with_instruction(self, original_content, user_context="当前对话", instruction_type="system"):
         """
-        为用户消息添加前3轮增强指令
+        为用户消息添加增强指令
         
         Args:
             original_content: 原始用户消息内容
             user_context: 用户上下文信息（用于指令中的占位符）
+            instruction_type: 指令类型，"system"(前3轮) 或 "ongoing"(第4轮及以后)
         
         Returns:
             str: 增强后的消息内容
         """
-        system_instructions = os.getenv('SYSTEM_INSTRUCTIONS', '')
-        
-        enhanced_content = original_content + self.early_conversation_instruction.format(
-            user_context=user_context,
-            system_instructions=system_instructions
-        )
-        print(f"✨ 用户消息已增强 | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
+        if instruction_type == "system":
+            # 前3轮：使用系统指令
+            instructions = os.getenv('SYSTEM_INSTRUCTIONS', '')
+            enhanced_content = self.early_conversation_instruction.format(
+                user_context=user_context,
+                system_instructions=instructions
+            )
+            print(f"✨ 用户消息已增强(系统指令) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
+        elif instruction_type == "ongoing":
+            # 第4轮及以后：使用持续指令
+            instructions = os.getenv('ONGOING_INSTRUCTIONS', '')
+            enhanced_content = self.ongoing_conversation_instruction.format(
+                user_context=user_context,
+                ongoing_instructions=instructions
+            )
+            print(f"✨ 用户消息已增强(持续指令) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
+        else:
+            raise ValueError(f"不支持的指令类型: {instruction_type}")
+            
         return enhanced_content
 
     async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None) -> AsyncGenerator[str, None]:
@@ -219,21 +129,32 @@ class AICompletionPort:
         # 3. 添加实际会话历史
         messages.extend(history)
         
-        # 🆕 4. 前3轮对话增强指令逻辑（流式版本）
+        # 🆕 4. 对话增强指令逻辑（流式版本）
         user_turn_count = self._count_real_user_turns(history)
         if user_turn_count <= 3 and messages:
+            # 前3轮：使用系统指令
             last_user_msg_index = self._find_last_user_message_index(messages)
             if last_user_msg_index is not None:
-                # 增强最后一条用户消息
                 original_content = messages[last_user_msg_index]["content"]
                 enhanced_content = self._enhance_user_message_with_instruction(
                     original_content, 
-                    f"第{user_turn_count}轮对话"
+                    original_content,
+                    instruction_type="system"
                 )
                 messages[last_user_msg_index]["content"] = enhanced_content
-                print(f"✅ 已为第{user_turn_count}轮对话添加增强指令（流式）")
-        elif user_turn_count > 3:
-            print(f"⏭️ 跳过指令增强（已超过3轮）: 当前第{user_turn_count}轮")
+                print(f"✅ 已为第{user_turn_count}轮对话添加系统增强指令（流式）")
+        elif user_turn_count >= 4 and messages:
+            # 第4轮及以后：使用持续指令
+            last_user_msg_index = self._find_last_user_message_index(messages)
+            if last_user_msg_index is not None:
+                original_content = messages[last_user_msg_index]["content"]
+                enhanced_content = self._enhance_user_message_with_instruction(
+                    original_content, 
+                    original_content,
+                    instruction_type="ongoing"
+                )
+                messages[last_user_msg_index]["content"] = enhanced_content
+                print(f"✅ 已为第{user_turn_count}轮对话添加持续增强指令（流式）")
         
         print(f"🔧 构建完整消息列表 | 总消息数: {len(messages)}")
         print("🧠" + "="*48)

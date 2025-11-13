@@ -235,8 +235,15 @@ class MessageService:
         self._store[session_id] = history
         logger.info(f"[DEBUG] regenerate_reply: trimmed history={history}")
 
-        # 3. 重新生成 AI 回复（传入上下文来源避免重复添加角色预置对话）
-        reply = await ai_port.generate_reply(role_data, history, user_input, session_context_source=session_context_source)
+        # 3. 重新生成 AI 回复（使用流式生成并收集完整回复）
+        reply = ""
+        async for chunk in ai_port.generate_reply_stream_with_retry(
+            role_data=role_data,
+            history=history,
+            user_input=user_input,
+            session_context_source=session_context_source
+        ):
+            reply += chunk
         logger.info(f"[DEBUG] regenerate_reply: new reply={reply}")
 
         # 4. 保存新的 Bot 回复

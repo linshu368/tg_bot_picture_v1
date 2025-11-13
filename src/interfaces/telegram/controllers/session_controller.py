@@ -244,8 +244,15 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
     context_source = session.get("context_source") if session else None
     
     try:
-        # 传入上下文来源避免重复添加角色预置对话
-        reply = await ai_completion_port.generate_reply(role_data, history, content, session_context_source=context_source)
+        # 使用流式生成并收集完整回复
+        reply = ""
+        async for chunk in ai_completion_port.generate_reply_stream_with_retry(
+            role_data=role_data,
+            history=history,
+            user_input=content,
+            session_context_source=context_source
+        ):
+            reply += chunk
     except TimeoutError:
         return envelope_error(4004, "生成超时，请重试")
     except Exception as e:
