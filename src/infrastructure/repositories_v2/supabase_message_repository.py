@@ -5,6 +5,7 @@ Supabase消息仓储
 
 import logging
 import uuid
+import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from .supabase_manager import SupabaseManager
@@ -19,7 +20,9 @@ class SupabaseMessageRepository:
         self.table_name = "messages"
     
     async def save_message(self, user_id: str, role_id: Optional[str], session_id: str, 
-                          message: str, sender: str) -> Optional[str]:
+                          message: str, sender: str,
+                          system_instructions: Optional[str] = None,
+                          ongoing_instructions: Optional[str] = None) -> Optional[str]:
         """
         保存消息到Supabase
         
@@ -29,6 +32,8 @@ class SupabaseMessageRepository:
             session_id: 会话ID (TEXT格式，如sess_xxxxxxxx)
             message: 消息内容
             sender: 发送者 ('user' 或 'bot')
+            system_instructions: 系统指令（前3轮用户消息使用）
+            ongoing_instructions: 持续指令（第4轮及以后用户消息使用）
             
         Returns:
             消息记录的ID，失败返回None
@@ -55,12 +60,17 @@ class SupabaseMessageRepository:
                 "role_id": str(role_id).strip() if role_id else None, 
                 "session_id": str(session_id).strip() if session_id else None,
                 "message": str(message).strip(),
-                "sender": str(sender).strip()
+                "sender": str(sender).strip(),
+                "system_instructions": system_instructions,
+                "ongoing_instructions": ongoing_instructions
                 # timestamp 和 last_interaction 由数据库触发器自动设置为东八区时间
             }
             
-            # 插入数据
-            result = client.table(self.table_name).insert(message_data).execute()
+            # 异步插入数据（使用线程池避免阻塞主线程）
+            def _sync_insert():
+                return client.table(self.table_name).insert(message_data).execute()
+            
+            result = await asyncio.to_thread(_sync_insert)
             
             if result.data and len(result.data) > 0:
                 record_id = result.data[0].get('id')
@@ -88,12 +98,15 @@ class SupabaseMessageRepository:
         try:
             client = self.supabase_manager.get_client()
             
-            result = client.table(self.table_name)\
-                .select("*")\
-                .eq("session_id", session_id)\
-                .order("timestamp", desc=False)\
-                .limit(limit)\
-                .execute()
+            def _sync_select():
+                return client.table(self.table_name)\
+                    .select("*")\
+                    .eq("session_id", session_id)\
+                    .order("timestamp", desc=False)\
+                    .limit(limit)\
+                    .execute()
+            
+            result = await asyncio.to_thread(_sync_select)
             
             if result.data:
                 self.logger.info(f"📚 获取会话消息: session_id={session_id}, count={len(result.data)}")
@@ -119,15 +132,18 @@ class SupabaseMessageRepository:
         try:
             client = self.supabase_manager.get_client()
             
-            query = client.table(self.table_name)\
-                .select("id", count="exact")\
-                .eq("user_id", user_id)\
-                .eq("sender", "user")  # 只统计用户发送的消息
+            def _sync_count():
+                query = client.table(self.table_name)\
+                    .select("id", count="exact")\
+                    .eq("user_id", user_id)\
+                    .eq("sender", "user")  # 只统计用户发送的消息
+                
+                if date_from:
+                    query = query.gte("timestamp", date_from.isoformat())
+                
+                return query.execute()
             
-            if date_from:
-                query = query.gte("timestamp", date_from.isoformat())
-            
-            result = query.execute()
+            result = await asyncio.to_thread(_sync_count)
             
             return result.count or 0
             
@@ -157,13 +173,15 @@ class SupabaseMessageRepository:
             # 转换为UTC时间用于数据库查询
             today_start_utc = today_start_beijing.astimezone(timezone.utc)
             
-            query = client.table(self.table_name)\
-                .select("id", count="exact")\
-                .eq("user_id", user_id)\
-                .eq("sender", "user")\
-                .gte("timestamp", today_start_utc.isoformat())
+            def _sync_daily_count():
+                return client.table(self.table_name)\
+                    .select("id", count="exact")\
+                    .eq("user_id", user_id)\
+                    .eq("sender", "user")\
+                    .gte("timestamp", today_start_utc.isoformat())\
+                    .execute()
             
-            result = query.execute()
+            result = await asyncio.to_thread(_sync_daily_count)
             
             count = result.count or 0
             self.logger.info(f"📊 用户今日消息统计: user_id={user_id}, count={count}")
@@ -186,10 +204,13 @@ class SupabaseMessageRepository:
         try:
             client = self.supabase_manager.get_client()
             
-            result = client.table(self.table_name)\
-                .delete()\
-                .eq("session_id", session_id)\
-                .execute()
+            def _sync_delete():
+                return client.table(self.table_name)\
+                    .delete()\
+                    .eq("session_id", session_id)\
+                    .execute()
+            
+            result = await asyncio.to_thread(_sync_delete)
             
             self.logger.info(f"🗑️ 删除会话消息: session_id={session_id}")
             return True
@@ -197,3 +218,74 @@ class SupabaseMessageRepository:
         except Exception as e:
             self.logger.error(f"❌ 删除会话消息失败: {e}")
             return False
+    
+    def save_user_message_with_real_instructions_async(self, user_id: str, role_id: Optional[str], 
+                                                      session_id: str, message: str,
+                                                      system_instructions: Optional[str] = None,
+                                                      ongoing_instructions: Optional[str] = None) -> asyncio.Task:
+        """
+        异步保存用户消息（使用AI生成时的真实指令内容）
+        
+        这是推荐的保存方式，确保保存的指令与AI调用时完全一致
+        
+        Args:
+            user_id: 用户ID
+            role_id: 角色ID
+            session_id: 会话ID
+            message: 消息内容
+            system_instructions: AI生成时实际使用的系统指令
+            ongoing_instructions: AI生成时实际使用的持续指令
+            
+        Returns:
+            asyncio.Task: 可以await的任务对象
+        """
+        async def _safe_save():
+            try:
+                result = await self.save_message(
+                    user_id=user_id,
+                    role_id=role_id,
+                    session_id=session_id,
+                    message=message,
+                    sender="user",
+                    system_instructions=system_instructions,
+                    ongoing_instructions=ongoing_instructions
+                )
+                
+                if result:
+                    instruction_type = "系统指令" if system_instructions else "持续指令" if ongoing_instructions else "无指令"
+                    self.logger.debug(f"🔄 异步保存用户消息成功（真实指令）: id={result}, 指令类型={instruction_type}")
+                else:
+                    self.logger.warning(f"⚠️ 异步保存用户消息失败: session={session_id}")
+            except Exception as e:
+                self.logger.error(f"❌ 异步保存用户消息异常: {e}")
+        
+        return asyncio.create_task(_safe_save())
+    
+    def save_bot_message_async(self, user_id: str, role_id: Optional[str], 
+                              session_id: str, message: str) -> asyncio.Task:
+        """
+        异步保存机器人消息（不阻塞主流程）
+        
+        Args:
+            user_id: 用户ID
+            role_id: 角色ID
+            session_id: 会话ID
+            message: 消息内容
+            
+        Returns:
+            asyncio.Task: 可以await的任务对象
+        """
+        async def _safe_save():
+            try:
+                result = await self.save_message(
+                    user_id, role_id, session_id, message, "bot"
+                    # bot消息不需要指令，使用默认的None值
+                )
+                if result:
+                    self.logger.debug(f"🔄 异步保存机器人消息成功: id={result}")
+                else:
+                    self.logger.warning(f"⚠️ 异步保存机器人消息失败: session={session_id}")
+            except Exception as e:
+                self.logger.error(f"❌ 异步保存机器人消息异常: {e}")
+        
+        return asyncio.create_task(_safe_save())

@@ -21,7 +21,13 @@ class AICompletionPort:
             "##用户信息:{user_context}\n"
             "##持续指令：\n"
             "{ongoing_instructions}"
-        )   
+        )
+        # 存储最近一次生成时使用的指令信息
+        self.last_used_instructions = {
+            "system_instructions": None,
+            "ongoing_instructions": None,
+            "turn_count": None
+        }   
 
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
@@ -72,7 +78,7 @@ class AICompletionPort:
             instruction_type: 指令类型，"system"(前3轮) 或 "ongoing"(第4轮及以后)
         
         Returns:
-            str: 增强后的消息内容
+            tuple: (增强后的消息内容, 使用的指令内容)
         """
         if instruction_type == "system":
             # 前3轮：使用系统指令
@@ -82,6 +88,7 @@ class AICompletionPort:
                 system_instructions=instructions
             )
             print(f"✨ 用户消息已增强(系统指令) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
+            return enhanced_content, instructions if instructions else None
         elif instruction_type == "ongoing":
             # 第4轮及以后：使用持续指令
             instructions = os.getenv('ONGOING_INSTRUCTIONS', '')
@@ -90,10 +97,9 @@ class AICompletionPort:
                 ongoing_instructions=instructions
             )
             print(f"✨ 用户消息已增强(持续指令) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
+            return enhanced_content, instructions if instructions else None
         else:
             raise ValueError(f"不支持的指令类型: {instruction_type}")
-            
-        return enhanced_content
 
     async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None) -> AsyncGenerator[str, None]:
         """
@@ -131,29 +137,41 @@ class AICompletionPort:
         
         # 🆕 4. 对话增强指令逻辑（流式版本）
         user_turn_count = self._count_real_user_turns(history)
+        
+        # 重置指令信息
+        self.last_used_instructions = {
+            "system_instructions": None,
+            "ongoing_instructions": None,
+            "turn_count": user_turn_count
+        }
+        
         if user_turn_count <= 3 and messages:
             # 前3轮：使用系统指令
             last_user_msg_index = self._find_last_user_message_index(messages)
             if last_user_msg_index is not None:
                 original_content = messages[last_user_msg_index]["content"]
-                enhanced_content = self._enhance_user_message_with_instruction(
+                enhanced_content, used_instruction = self._enhance_user_message_with_instruction(
                     original_content, 
                     original_content,
                     instruction_type="system"
                 )
                 messages[last_user_msg_index]["content"] = enhanced_content
+                # 存储实际使用的指令
+                self.last_used_instructions["system_instructions"] = used_instruction
                 print(f"✅ 已为第{user_turn_count}轮对话添加系统增强指令（流式）")
         elif user_turn_count >= 4 and messages:
             # 第4轮及以后：使用持续指令
             last_user_msg_index = self._find_last_user_message_index(messages)
             if last_user_msg_index is not None:
                 original_content = messages[last_user_msg_index]["content"]
-                enhanced_content = self._enhance_user_message_with_instruction(
+                enhanced_content, used_instruction = self._enhance_user_message_with_instruction(
                     original_content, 
                     original_content,
                     instruction_type="ongoing"
                 )
                 messages[last_user_msg_index]["content"] = enhanced_content
+                # 存储实际使用的指令
+                self.last_used_instructions["ongoing_instructions"] = used_instruction
                 print(f"✅ 已为第{user_turn_count}轮对话添加持续增强指令（流式）")
         
         print(f"🔧 构建完整消息列表 | 总消息数: {len(messages)}")
@@ -269,6 +287,19 @@ class AICompletionPort:
         if self.grok:
             return self.grok
         return None
+    
+    def get_last_used_instructions(self) -> dict:
+        """
+        获取最近一次AI生成时使用的指令信息
+        
+        Returns:
+            dict: {
+                "system_instructions": str | None,
+                "ongoing_instructions": str | None, 
+                "turn_count": int | None
+            }
+        """
+        return self.last_used_instructions.copy()
 
 
 # ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
