@@ -4,6 +4,10 @@ from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, Optional
 from telegram import Update
+import re
+
+# 去除形如 <...> 的标签（HTML/样式标记等）
+_TAG_PATTERN = re.compile(r"<[^>]*>")
 
 class StreamMessageService:
     """
@@ -27,14 +31,16 @@ class StreamMessageService:
         self.role_service = role_service
 
     def _safe_text_for_telegram(self, text: str) -> str:
-        """Sanitize text to avoid Unicode surrogate encoding errors when sending to Telegram.
-
-        Drops unencodable characters by encoding with 'ignore' and decoding back.
+        """Sanitize outgoing text:
+        1) remove all <...> tags; 2) drop unencodable characters for Telegram.
         """
         try:
             if text is None:
                 return ""
-            return text.encode('utf-8', 'ignore').decode('utf-8', 'ignore')
+            # 正则清洗：去掉 <...> 结构
+            cleaned = _TAG_PATTERN.sub("", str(text))
+            # 编码安全：忽略不可编码字符
+            return cleaned.encode('utf-8', 'ignore').decode('utf-8', 'ignore')
         except Exception:
             return ""
     
@@ -180,7 +186,7 @@ class StreamMessageService:
                     self.logger.error(f"最终更新消息失败: {e}")
                 
                 # 保存完整回复到数据库
-                message_service.save_message(session_id, "assistant", accumulated_text)
+                message_service.save_message(session_id, "assistant", self._safe_text_for_telegram(accumulated_text))
                 
                 # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令）
                 if message_service.message_repository and hasattr(message_service, 'session_service'):
@@ -342,13 +348,25 @@ class StreamMessageService:
             self.logger.error(f"❌ 角色配置错误: 默认角色也不存在")
             return {"code": 4001, "message": "角色配置错误", "data": None}
 
-        # 取消首条消息埋点逻辑（统一改为最早接收时上报）
+   
 
         # 保存用户消息并获取历史
         user_message_id = message_service.save_message(session_id, "user", content)
         history = message_service.get_history(session_id)
+        # 清洗历史消息内容，确保与展示一致
+        cleaned_history = []
+        for msg in history or []:
+            try:
+                msg_copy = dict(msg) if isinstance(msg, dict) else msg
+                if isinstance(msg_copy, dict) and "content" in msg_copy:
+                    # 仅清洗 bot 输出，用户输入保持原样
+                    if msg_copy.get("role") == "assistant":
+                        msg_copy["content"] = self._safe_text_for_telegram(msg_copy.get("content"))
+                cleaned_history.append(msg_copy)
+            except Exception:
+                cleaned_history.append(msg)
+        history = cleaned_history
 
-        # 取消每条用户消息埋点逻辑（统一改为最早接收时上报）
         
         # 获取会话上下文来源
         context_source = session.get("context_source") if session else None
