@@ -68,6 +68,7 @@ def initialize_global_services(container: Container):
     stream_message_service_module = importlib.import_module("src.core.services.stream_message_service")
     message_service_module = importlib.import_module("src.domain.services.message_service")
     ai_completion_port_module = importlib.import_module("src.domain.services.ai_completion_port")
+    user_processing_state_module = importlib.import_module("src.core.services.user_processing_state")
     
     # 替换全局实例
     session_service_module.session_service = container.get("session_service")
@@ -76,8 +77,9 @@ def initialize_global_services(container: Container):
     stream_message_service_module.stream_message_service = container.get("stream_message_service")
     message_service_module.message_service = container.get("message_service")
     ai_completion_port_module.ai_completion_port = container.get("ai_completion_port")
+    user_processing_state_module.user_processing_state = container.get("user_processing_state")
     
-    logging.getLogger(__name__).info("✅ 全局服务实例已初始化（包含message_service和ai_completion_port）")
+    logging.getLogger(__name__).info("✅ 全局服务实例已初始化（包含message_service、ai_completion_port和user_processing_state）")
 
 
 def setup_container(settings) -> Container:
@@ -93,6 +95,14 @@ def setup_container(settings) -> Container:
         return SupabaseManager(c.get("settings").database)
     
     container.register_factory("supabase_manager", supabase_manager_factory)
+    
+    # # 注册 Point 组合仓库（MVP：JSON 实现）
+    # def point_composite_repository_factory(c):
+    #     from src.infrastructure.repositories_v2.point_repository_json import JSONPointRepository
+    #     # 可按需从 settings 中读取目录，默认 data/payments
+    #     return JSONPointRepository(base_dir="data/payments")
+    
+    # container.register_factory("point_composite_repository", point_composite_repository_factory)
     
     # 注册 Repository 层
     def role_repository_factory(c):
@@ -144,6 +154,13 @@ def setup_container(settings) -> Container:
     
     container.register_factory("stream_message_service", stream_message_service_factory)
     
+    # 🆕 注册用户处理状态管理器
+    def user_processing_state_factory(c):
+        from src.core.services.user_processing_state import user_processing_state
+        return user_processing_state
+    
+    container.register_factory("user_processing_state", user_processing_state_factory)
+    
     # 注册消息服务
     def message_service_factory(c):
         from src.domain.services.message_service import MessageService
@@ -175,36 +192,36 @@ def setup_container(settings) -> Container:
     
     container.register_factory("ai_completion_port", ai_completion_port_factory)
     
-    def payment_api_factory(c):
-        from src.infrastructure.external_apis.payment_api import PaymentAPI
-        return PaymentAPI()
+    # def payment_api_factory(c):
+    #     from src.infrastructure.external_apis.payment_api import PaymentAPI
+    #     return PaymentAPI()
     
-    container.register_factory("payment_api", payment_api_factory)
+    # container.register_factory("payment_api", payment_api_factory)
     
 
-    def payment_service_factory(c):
-        from src.domain.services.payment_service import PaymentService
-        service = PaymentService(
-            payment_config=c.get("settings").payment.__dict__ if hasattr(c.get("settings"), 'payment') else {},
-            payment_api=c.get("payment_api"),
-            point_composite_repo=c.get("point_composite_repository")
-        )
-        service.logger.info("🔧 PaymentService: 迁移完成 - 仅依赖PointCompositeRepository")
-        return service
+    # def payment_service_factory(c):
+    #     from src.domain.services.payment_service import PaymentService
+    #     service = PaymentService(
+    #         payment_config=c.get("settings").payment.__dict__ if hasattr(c.get("settings"), 'payment') else {},
+    #         payment_api=c.get("payment_api"),
+    #         point_composite_repo=c.get("point_composite_repository")
+    #     )
+    #     service.logger.info("🔧 PaymentService: 迁移完成 - 仅依赖PointCompositeRepository")
+    #     return service
     
-    container.register_factory("payment_service", payment_service_factory)
+    # container.register_factory("payment_service", payment_service_factory)
 
-    # 注册支付回调处理器
-    def payment_webhook_handler_factory(c):
-        from src.infrastructure.messaging.payment_webhook import PaymentWebhookHandler
-        return PaymentWebhookHandler(
-            c.get("payment_service"),
-            c.get("user_service"),
-            c.get("telegram_bot"),
-            c.get("payment_api")
-        )
+    # # 注册支付回调处理器
+    # def payment_webhook_handler_factory(c):
+    #     from src.infrastructure.messaging.payment_webhook import PaymentWebhookHandler
+    #     return PaymentWebhookHandler(
+    #         c.get("payment_service"),
+    #         c.get("user_service"),
+    #         c.get("telegram_bot"),
+    #         c.get("payment_api")
+    #     )
     
-    container.register_factory("payment_webhook_handler", payment_webhook_handler_factory)
+    # container.register_factory("payment_webhook_handler", payment_webhook_handler_factory)
     
     # 返回配置好的容器
     return container

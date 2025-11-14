@@ -197,7 +197,7 @@ class AICompletionPort:
             chunk_count += 1
             total_chars += len(partial_reply)
             safe_chunk_preview = self._safe_for_logging(partial_reply, 50)
-            print(f"🔄 收到chunk #{chunk_count}: {len(partial_reply)} 字符 | 内容预览: {safe_chunk_preview}...")
+            # print(f"🔄 收到chunk #{chunk_count}: {len(partial_reply)} 字符 | 内容预览: {safe_chunk_preview}...")
             yield partial_reply
 
         # 结束流式生成

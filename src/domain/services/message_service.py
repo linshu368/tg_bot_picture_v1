@@ -28,7 +28,7 @@ class MessageService:
         
         # 打印保存的消息信息
         print(f"💾 保存消息 | Session: {session_id} | Role: {role} | ID: {message_id}")
-        print(f"📝 内容: {content}")
+        # print(f"📝 内容: {content}")
         print(f"📊 当前会话消息数: {len(self._store[session_id])}")
         print("-" * 50)
         

@@ -124,7 +124,8 @@ class TextBot:
         if not self.bot_token:
             raise ValueError("TEXT_BOT_TOKEN 未配置")
 
-        app = ApplicationBuilder().token(self.bot_token).build()
+        # 允许并发处理更新，以便在一条消息处理中时，下一条消息能及时进入过滤并发送提示
+        app = ApplicationBuilder().token(self.bot_token).concurrent_updates(True).build()
 
         # 注册命令与消息处理器
         app.add_handler(CommandHandler("start", self._on_start))
@@ -367,23 +368,26 @@ class TextBot:
 
         # 🆕 导入用户状态管理器
         from src.core.services.user_processing_state import user_processing_state
-
-        # 🆕 检查用户是否已在处理中
-        if await user_processing_state.is_processing(user_id):
-            # 发送提示消息（30秒后自动删除）
+        # 🆕 先基于消息发送时间做窗口过滤：忽略在上一/当前处理窗口内发送的消息
+        try:
+            msg_dt = update.message.date  # Telegram 提供UTC时间
+            if await user_processing_state.should_ignore_message(user_id, msg_dt):
+                warning_msg = await update.message.reply_text("⏳ 请等待上一条消息完成")
+                asyncio.create_task(self._delete_message_after_delay(
+                    context.bot, warning_msg.chat_id, warning_msg.message_id, 30
+                ))
+                self.logger.info(f"🚫 用户 {user_id} 消息被忽略（属于处理窗口期间发送）: {content}")
+                return
+        except Exception as _e:
+            self.logger.debug(f"ignore-window check skipped: {_e}")
+        
+        # 🆕 直接尝试获取处理锁；若失败（并发竞争）则提示并返回
+        if not await user_processing_state.start_processing(user_id):
             warning_msg = await update.message.reply_text("⏳ 请等待上一条消息完成")
-            
-            # 30秒后删除提示消息
             asyncio.create_task(self._delete_message_after_delay(
                 context.bot, warning_msg.chat_id, warning_msg.message_id, 30
             ))
-            
-            self.logger.info(f"🚫 用户 {user_id} 消息被忽略（正在处理中）: {content}")
-            return
-
-        # 🆕 获取处理锁
-        if not await user_processing_state.start_processing(user_id):
-            self.logger.warning(f"⚠️ 用户 {user_id} 获取处理锁失败")
+            self.logger.info(f"🚫 用户 {user_id} 消息被忽略（加锁失败并发竞争）: {content}")
             return
 
         try:
