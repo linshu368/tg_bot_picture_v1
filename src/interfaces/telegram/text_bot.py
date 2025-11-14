@@ -350,6 +350,7 @@ class TextBot:
             from datetime import datetime, timezone
             from src.infrastructure.analytics.analytics import track_event_background as _track_bg, is_enabled as _analytics_enabled
             if _analytics_enabled():
+                self.logger.info("📊 埋点触发: event=message_received user_id=%s", user_id)
                 # 若在此处无法获取会话与角色，则传空字符串
                 session_id = ""
                 role_id = ""
@@ -357,11 +358,13 @@ class TextBot:
                     distinct_id=str(user_id),
                     event="message_received",
                     properties={
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        # "timestamp": datetime.now(timezone.utc).isoformat(),
                         "session_id": session_id,
                         "role_id": role_id
                     }
                 )
+            else:
+                self.logger.info("📊 埋点未启用: 跳过 event=message_received user_id=%s", user_id)
         except Exception as _e:
             # 任何异常不得影响主流程
             self.logger.debug(f"analytics skipped: {_e}")

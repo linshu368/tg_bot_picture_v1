@@ -78,8 +78,8 @@ def track_event(distinct_id: str, event: str, properties: Optional[Dict[str, Any
     try:
         props = dict(properties or {})
         # 确保存在 timestamp（东八区 ISO8601）
-        if "timestamp" not in props:
-            props["timestamp"] = _now_iso()
+        # if "timestamp" not in props:
+            # props["timestamp"] = _now_iso()
         _posthog.capture(distinct_id=distinct_id, event=event, properties=props)
         logger.info(f"✅ PostHog event sent: {event} for user {distinct_id}")
     except Exception as e:
@@ -106,8 +106,8 @@ def track_event_background(distinct_id: str, event: str, properties: Optional[Di
         return
 
     props = dict(properties or {})
-    if "timestamp" not in props:
-        props["timestamp"] = _now_iso()
+    # if "timestamp" not in props:
+        # props["timestamp"] = _now_iso()
 
     try:
         _executor.submit(_safe_capture, distinct_id, event, props)
