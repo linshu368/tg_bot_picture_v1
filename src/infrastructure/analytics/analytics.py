@@ -73,6 +73,7 @@ def track_event(distinct_id: str, event: str, properties: Optional[Dict[str, Any
     发送 PostHog 事件（无配置时自动降级为 no-op）
     """
     if not is_enabled():
+        logger.debug(f"PostHog disabled, skipping event: {event} for user {distinct_id}")
         return
     try:
         props = dict(properties or {})
@@ -80,8 +81,9 @@ def track_event(distinct_id: str, event: str, properties: Optional[Dict[str, Any
         if "timestamp" not in props:
             props["timestamp"] = _now_iso()
         _posthog.capture(distinct_id=distinct_id, event=event, properties=props)
+        logger.info(f"✅ PostHog event sent: {event} for user {distinct_id}")
     except Exception as e:
-        logger.debug(f"PostHog track failed: {e}")
+        logger.error(f"❌ PostHog track failed: {event} for user {distinct_id}, error: {e}")
 
 def track_event_background(distinct_id: str, event: str, properties: Optional[Dict[str, Any]] = None) -> None:
     """
@@ -90,15 +92,17 @@ def track_event_background(distinct_id: str, event: str, properties: Optional[Di
     - 任务中自行吞掉异常，绝不影响调用方
     """
     if not is_enabled():
+        logger.debug(f"PostHog disabled, skipping background event: {event} for user {distinct_id}")
         return
     if _executor is None:
         _init_executor()
     if _executor is None:
         # 无法创建线程池则降级为同步但仍吞异常
+        logger.warning(f"Thread pool unavailable, falling back to sync for event: {event}")
         try:
             track_event(distinct_id, event, properties)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"❌ PostHog sync fallback failed: {event} for user {distinct_id}, error: {e}")
         return
 
     props = dict(properties or {})
@@ -107,17 +111,20 @@ def track_event_background(distinct_id: str, event: str, properties: Optional[Di
 
     try:
         _executor.submit(_safe_capture, distinct_id, event, props)
-    except Exception:
+        logger.info(f"🔄 PostHog background event queued: {event} for user {distinct_id}")
+    except Exception as e:
         # 提交失败也不抛给上层
-        pass
+        logger.error(f"❌ PostHog background event queue failed: {event} for user {distinct_id}, error: {e}")
 
 def _safe_capture(distinct_id: str, event: str, properties: Dict[str, Any]) -> None:
     try:
         if not is_enabled():
+            logger.debug(f"PostHog disabled in background task, skipping: {event} for user {distinct_id}")
             return
         _posthog.capture(distinct_id=distinct_id, event=event, properties=properties)  # type: ignore
+        logger.info(f"✅ PostHog background event sent: {event} for user {distinct_id}")
     except Exception as e:
-        # 后台任务中吞掉异常，打印为调试日志
-        logger.debug(f"PostHog background capture failed: {e}")
+        # 后台任务中吞掉异常，但使用INFO级别确保能看到错误
+        logger.info(f"❌ PostHog background capture failed: {event} for user {distinct_id}, error: {e}")
 
 

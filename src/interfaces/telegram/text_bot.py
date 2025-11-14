@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio
 from typing import Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -59,6 +60,7 @@ class TextBot:
         self.user_service = DummyService()
         self.image_service = DummyService()
         self.payment_service = DummyService()
+        self.action_record_service = DummyService()
         # --------------------------------------------------
         self.callback_handler = TextBotCallbackHandler(self)
         # 用于保存快照命名的临时状态：user_id -> {session_id}
@@ -342,38 +344,115 @@ class TextBot:
         content = update.message.text
         self.logger.info("📥 消息 user_id=%s text=%s", user_id, content)
 
-        # 命名态拦截：优先处理保存快照命名
-        if self.pending_snapshot.get(user_id):
-            session_id = self.pending_snapshot[user_id].get("session_id")
+        # 🆕 最早时刻埋点：收到用户文本消息即上报（仅 user_id 与 timestamp）
+        try:
+            from datetime import datetime, timezone
+            from src.infrastructure.analytics.analytics import track_event_background as _track_bg, is_enabled as _analytics_enabled
+            if _analytics_enabled():
+                # 若在此处无法获取会话与角色，则传空字符串
+                session_id = ""
+                role_id = ""
+                _track_bg(
+                    distinct_id=str(user_id),
+                    event="message_received",
+                    properties={
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "session_id": session_id,
+                        "role_id": role_id
+                    }
+                )
+        except Exception as _e:
+            # 任何异常不得影响主流程
+            self.logger.debug(f"analytics skipped: {_e}")
+
+        # 🆕 导入用户状态管理器
+        from src.core.services.user_processing_state import user_processing_state
+
+        # 🆕 检查用户是否已在处理中
+        if await user_processing_state.is_processing(user_id):
+            # 发送提示消息（30秒后自动删除）
+            warning_msg = await update.message.reply_text("⏳ 请等待上一条消息完成")
+            
+            # 30秒后删除提示消息
+            asyncio.create_task(self._delete_message_after_delay(
+                context.bot, warning_msg.chat_id, warning_msg.message_id, 30
+            ))
+            
+            self.logger.info(f"🚫 用户 {user_id} 消息被忽略（正在处理中）: {content}")
+            return
+
+        # 🆕 获取处理锁
+        if not await user_processing_state.start_processing(user_id):
+            self.logger.warning(f"⚠️ 用户 {user_id} 获取处理锁失败")
+            return
+
+        try:
+            # 命名态拦截：优先处理保存快照命名
+            if self.pending_snapshot.get(user_id):
+                session_id = self.pending_snapshot[user_id].get("session_id")
+                try:
+                    title = content.strip() if content.strip() else "未命名"
+                    snapshot_id = await self.snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title=title)
+                    self.logger.info(f"✅ 快照已保存(命名): snapshot_id={snapshot_id}")
+                    await update.message.reply_text("✅ 保存成功，可在主菜单点击「🗂 历史聊天」查看保存结果。也可直接发送消息继续对话")
+                except Exception as e:
+                    self.logger.error(f"❌ 保存快照失败(命名): {e}")
+                    await update.message.reply_text("❌ 保存失败，请重试")
+                finally:
+                    self.pending_snapshot.pop(user_id, None)
+                return
+
+            # 处理底部主菜单按钮
+            if content == "🎭 选择角色":
+                await self._handle_role_selection(update, user_id)
+                return
+            elif content == "🗂 历史聊天":
+                await self._handle_history_list(update, context, user_id)
+                return
+            elif content == "💳 购买积分":
+                # 路由到 /buy 逻辑，最大化复用原有回调链
+                try:
+                    from src.interfaces.telegram.handlers.command.payment_commands import PaymentCommandHandler
+                    payment_cmd = PaymentCommandHandler(self)
+                    await payment_cmd.handle_buy_command(update, context)
+                except Exception as e:
+                    self.logger.error(f"❌ 购买积分入口失败: {e}")
+                    await update.message.reply_text("试运营中，积分购买即将开放，敬请期待")
+                return
+            elif content == "❓ 帮助":
+                await self._handle_help(update, user_id)
+                return
+
+            # 使用应用层的流式消息服务处理
+            from src.core.services.stream_message_service import stream_message_service
+            await stream_message_service.handle_stream_message(update, user_id, content, self.ui_handler)
+
+        except Exception as e:
+            self.logger.error(f"❌ 消息处理失败: {e}")
             try:
-                title = content.strip() if content.strip() else "未命名"
-                snapshot_id = await self.snapshot_service.save_snapshot(user_id=user_id, session_id=session_id, user_title=title)
-                self.logger.info(f"✅ 快照已保存(命名): snapshot_id={snapshot_id}")
-                await update.message.reply_text("✅ 保存成功，可在主菜单点击「🗂 历史聊天」查看保存结果。也可直接发送消息继续对话")
-            except Exception as e:
-                self.logger.error(f"❌ 保存快照失败(命名): {e}")
-                await update.message.reply_text("❌ 保存失败，请重试")
-            finally:
-                self.pending_snapshot.pop(user_id, None)
-            return
+                await update.message.reply_text("❌ 处理消息时出现错误，请重试")
+            except:
+                pass
+        finally:
+            # 🆕 确保在所有情况下都释放锁
+            await user_processing_state.finish_processing(user_id)
 
-        # 处理底部主菜单按钮
-        if content == "🎭 选择角色":
-            await self._handle_role_selection(update, user_id)
-            return
-        elif content == "🗂 历史聊天":
-            await self._handle_history_list(update, context, user_id)
-            return
-        elif content == "❓ 帮助":
-            await self._handle_help(update, user_id)
-            return
-
-        # 使用应用层的流式消息服务处理
-        from src.core.services.stream_message_service import stream_message_service
-        await stream_message_service.handle_stream_message(update, user_id, content, self.ui_handler)
-
-        self.logger.info("📥 消息 user_id=%s text=%s", update.effective_user.id, update.message.text)
-
+    # 🆕 添加消息自动删除方法
+    async def _delete_message_after_delay(self, bot, chat_id, message_id, delay_seconds):
+        """延迟删除消息
+        
+        Args:
+            bot: Telegram Bot 实例
+            chat_id: 聊天ID
+            message_id: 消息ID
+            delay_seconds: 延迟时间（秒）
+        """
+        await asyncio.sleep(delay_seconds)
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            self.logger.info(f"🗑️ 已删除提示消息: chat_id={chat_id}, message_id={message_id}")
+        except Exception as e:
+            self.logger.debug(f"删除消息失败（可能已被删除）: {e}")
 
     # -------------------------
     # 底部菜单处理方法
@@ -486,6 +565,45 @@ class TextBot:
         if action in handlers:
             await handlers[action](query, context)
         else:
+            # 支付相关回调前缀匹配（兼容形如 select_package_xxx / buy_package_method_pkg）
+            try:
+                from src.interfaces.telegram.handlers.callback.payment_callbacks import PaymentCallbackHandler
+                pay_handler = PaymentCallbackHandler(self)
+                
+                data = raw_data
+                if data == "buy_credits":
+                    await pay_handler.handle_buy_credits_callback(query, context)
+                    return
+                if data.startswith("select_package_"):
+                    package_id = data.replace("select_package_", "", 1)
+                    await pay_handler.handle_package_selection(query, context, package_id)
+                    return
+                if data.startswith("buy_package_"):
+                    # buy_package_{method_id}_{package_id}
+                    parts = data.split("_", 3)
+                    # parts: ["buy", "package", method_id, package_id]
+                    if len(parts) >= 4:
+                        method_id = parts[2]
+                        package_id = parts[3]
+                        await pay_handler.handle_package_purchase(query, context, method_id, package_id)
+                        return
+                if data.startswith("check_order_"):
+                    order_no = data.replace("check_order_", "", 1)
+                    await pay_handler.handle_check_order_callback(query, context, order_no)
+                    return
+                if data.startswith("cancel_order_"):
+                    order_no = data.replace("cancel_order_", "", 1)
+                    await pay_handler.handle_cancel_order_callback(query, context, order_no)
+                    return
+                if data == "back_to_buy":
+                    await pay_handler.handle_back_to_buy(query, context)
+                    return
+                if data == "cancel_buy":
+                    await pay_handler.handle_cancel_buy(query, context)
+                    return
+            except Exception as e:
+                self.logger.error(f"❌ 支付回调分发失败: {e}")
+            
             self.logger.warning(f"⚠️ 未知回调 action={action}, data={raw_data}, 可用 handlers={list(handlers.keys())}")
             await query.answer("未知操作")
 

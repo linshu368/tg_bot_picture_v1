@@ -41,16 +41,23 @@ class StreamMessageService:
     async def handle_stream_message(self, update: Update, user_id: str, content: str, ui_handler=None) -> None:
         """
         处理流式回复消息的主要业务流程
+        🆕 增强异常处理，确保用户状态正确释放
         
         Args:
             update: Telegram Update 对象
             user_id: 用户ID
             content: 消息内容
             ui_handler: UI处理器（用于构建回复键盘）
+            
+        Raises:
+            Exception: 重新抛出异常，让调用方（TextBot）处理状态释放
         """
+        initial_msg = None
+        
         try:
             # 1. 发送初始消息
             initial_msg = await update.message.reply_text("✍️输入中...")
+            self.logger.info(f"🚀 开始处理用户 {user_id} 的流式消息")
             
             # 2. 获取会话和角色信息
             session_info = await self._get_session_and_role(user_id, content)
@@ -59,6 +66,7 @@ class StreamMessageService:
                 # 处理错误情况
                 error_text = f"❌ 出错: {session_info['message']} (code={session_info['code']})"
                 await initial_msg.edit_text(error_text)
+                self.logger.warning(f"⚠️ 用户 {user_id} 会话获取失败: {session_info['message']}")
                 return
             
             data = session_info["data"]
@@ -66,6 +74,8 @@ class StreamMessageService:
             role_data = data["role_data"]
             history = data["history"]
             context_source = data.get("context_source")
+            
+            self.logger.info(f"📊 用户 {user_id} 会话信息: session_id={session_id}, history_count={len(history)}")
             
             # 3. 执行精细化流式回复
             await self._execute_granular_stream_reply(
@@ -78,13 +88,27 @@ class StreamMessageService:
                 user_message_id=data.get("user_message_id", ""),
                 ui_handler=ui_handler
             )
+            
+            self.logger.info(f"✅ 用户 {user_id} 流式消息处理完成")
                 
         except Exception as e:
-            self.logger.error(f"流式消息处理失败: {e}")
+            # 🆕 详细记录异常信息
+            import traceback
+            error_details = f"类型: {type(e).__name__}, 消息: {str(e)}, 用户: {user_id}"
+            self.logger.error(f"❌ 流式消息处理失败 - {error_details}")
+            self.logger.error(f"完整堆栈:\n{traceback.format_exc()}")
+            
+            # 🆕 尽力向用户显示错误信息
             try:
-                await initial_msg.edit_text(f"❌ 处理失败: {str(e)}")
-            except:
-                await update.message.reply_text(f"❌ 处理失败: {str(e)}")
+                if initial_msg:
+                    await initial_msg.edit_text(f"抱歉，回复出现了问题，后台正在加紧修复，请耐心等待")
+                else:
+                    await update.message.reply_text(f"抱歉，回复出现了问题，后台正在加紧修复，请耐心等待")
+            except Exception as msg_e:
+                self.logger.error(f"❌ 发送错误消息也失败: {msg_e}")
+            
+            # 🆕 重新抛出异常，让TextBot的finally块处理状态释放
+            raise
 
     async def _execute_granular_stream_reply(self, initial_msg, role_data, history, content, 
                                            context_source, session_id, user_message_id, ui_handler):
@@ -318,47 +342,13 @@ class StreamMessageService:
             self.logger.error(f"❌ 角色配置错误: 默认角色也不存在")
             return {"code": 4001, "message": "角色配置错误", "data": None}
 
-        # 埋点：在保存用户消息之前判断是否为首条消息（以 Supabase 持久化为准）
-        try:
-            from src.domain.services.message_service import message_service as _msg_service
-            from src.infrastructure.analytics.analytics import track_event_background as _track_bg, is_enabled as _analytics_enabled
-            if _analytics_enabled():
-                # 统计历史消息（仅 sender='user'）
-                user_count = await _msg_service.get_user_message_count(user_id)
-                if user_count == 0:
-                    _track_bg(
-                        distinct_id=str(user_id),
-                        event="first_message_sent",
-                        properties={
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                            "session_id": session_id,
-                            "role_id": current_role_id
-                        }
-                    )
-        except Exception as e:
-            # 任何异常都不影响主流程
-            self.logger.debug(f"PostHog first_message_sent 事件跳过: {e}")
+        # 取消首条消息埋点逻辑（统一改为最早接收时上报）
 
         # 保存用户消息并获取历史
         user_message_id = message_service.save_message(session_id, "user", content)
         history = message_service.get_history(session_id)
 
-        # 埋点：message_sent（每条用户消息）
-        try:
-            from src.infrastructure.analytics.analytics import track_event_background as _track_bg2, is_enabled as _analytics_enabled2
-            if _analytics_enabled2():
-                _track_bg2(
-                    distinct_id=str(user_id),
-                    event="message_sent",
-                    properties={
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "session_id": session_id,
-                        "role_id": current_role_id
-                    }
-                )
-        except Exception as e:
-            # 任何异常都不影响主流程
-            self.logger.debug(f"PostHog message_sent 事件跳过: {e}")
+        # 取消每条用户消息埋点逻辑（统一改为最早接收时上报）
         
         # 获取会话上下文来源
         context_source = session.get("context_source") if session else None
