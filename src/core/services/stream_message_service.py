@@ -149,11 +149,22 @@ class StreamMessageService:
         
         try:
             # 使用带重试机制的流式生成
+            # 用于接收AI端回传的指令使用信息（避免使用全局共享状态）
+            used_instructions_meta = {}
+            def _on_used_instructions(meta: dict) -> None:
+                try:
+                    used_instructions_meta.clear()
+                    if isinstance(meta, dict):
+                        used_instructions_meta.update(meta)
+                except Exception as _e:
+                    self.logger.debug(f"on_used_instructions 回调处理失败: {_e}")
+
             async for chunk in ai_completion_port.generate_reply_stream_with_retry(
                 role_data=role_data,
                 history=history,
                 user_input=content,
-                session_context_source=context_source
+                session_context_source=context_source,
+                on_used_instructions=_on_used_instructions
             ):
                 # 对大块进行字符级分割处理
                 await self._process_chunk_with_granular_control(
@@ -188,12 +199,11 @@ class StreamMessageService:
                 # 保存完整回复到数据库
                 message_service.save_message(session_id, "assistant", self._safe_text_for_telegram(accumulated_text))
                 
-                # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令）
+                # 🆕 AI生成完成后，使用回调传回的实际使用指令，重新保存用户消息（带指令）
                 if message_service.message_repository and hasattr(message_service, 'session_service'):
                     try:
-                        used_instructions = ai_completion_port.get_last_used_instructions()
-                        system_instructions = used_instructions.get("system_instructions")
-                        ongoing_instructions = used_instructions.get("ongoing_instructions")
+                        system_instructions = used_instructions_meta.get("system_instructions")
+                        ongoing_instructions = used_instructions_meta.get("ongoing_instructions")
                         
                         if system_instructions or ongoing_instructions:
                             # 获取session_id中的user_id和role_id

@@ -2,7 +2,7 @@
 import time
 import random
 import os
-from typing import Optional, Callable, AsyncGenerator
+from typing import Optional, Callable, AsyncGenerator, Dict, Any
 from demo.grok_async import AsyncGrokCaller
 from demo.novel_async import AsyncNovelCaller
 
@@ -22,12 +22,8 @@ class AICompletionPort:
             "##持续指令：\n"
             "{ongoing_instructions}"
         )
-        # 存储最近一次生成时使用的指令信息
-        self.last_used_instructions = {
-            "system_instructions": None,
-            "ongoing_instructions": None,
-            "turn_count": None
-        }   
+        # 取消实例级共享状态，改为通过回调向调用方传递本次使用的指令信息
+        # self.last_used_instructions 已移除
 
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
@@ -101,7 +97,7 @@ class AICompletionPort:
         else:
             raise ValueError(f"不支持的指令类型: {instruction_type}")
 
-    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None) -> AsyncGenerator[str, None]:
+    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None, on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None) -> AsyncGenerator[str, None]:
         """
         流式生成AI回复 - 返回异步生成器，用于Telegram Bot的流式更新
         
@@ -111,6 +107,7 @@ class AICompletionPort:
             user_input: 当前用户输入
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
+            on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅调用一次）
             
         Yields:
             str: 每个流式回复片段
@@ -137,12 +134,12 @@ class AICompletionPort:
         
         # 🆕 4. 对话增强指令逻辑（流式版本）
         user_turn_count = self._count_real_user_turns(history)
-        
-        # 重置指令信息
-        self.last_used_instructions = {
+        used_meta: Dict[str, Any] = {
+            "turn_count": user_turn_count,
+            "instruction_type": None,
             "system_instructions": None,
             "ongoing_instructions": None,
-            "turn_count": user_turn_count
+            "model": model_name
         }
         
         if user_turn_count <= 3 and messages:
@@ -156,8 +153,8 @@ class AICompletionPort:
                     instruction_type="system"
                 )
                 messages[last_user_msg_index]["content"] = enhanced_content
-                # 存储实际使用的指令
-                self.last_used_instructions["system_instructions"] = used_instruction
+                used_meta["instruction_type"] = "system"
+                used_meta["system_instructions"] = used_instruction
                 print(f"✅ 已为第{user_turn_count}轮对话添加系统增强指令（流式）")
         elif user_turn_count >= 4 and messages:
             # 第4轮及以后：使用持续指令
@@ -170,8 +167,8 @@ class AICompletionPort:
                     instruction_type="ongoing"
                 )
                 messages[last_user_msg_index]["content"] = enhanced_content
-                # 存储实际使用的指令
-                self.last_used_instructions["ongoing_instructions"] = used_instruction
+                used_meta["instruction_type"] = "ongoing"
+                used_meta["ongoing_instructions"] = used_instruction
                 print(f"✅ 已为第{user_turn_count}轮对话添加持续增强指令（流式）")
         
         print(f"🔧 构建完整消息列表 | 总消息数: {len(messages)}")
@@ -193,6 +190,13 @@ class AICompletionPort:
         if use_caller is None:
             raise RuntimeError("未配置任何可用的AI调用器（Grok/Novel）")
 
+        # 在开始流式之前，回调一次提供指令使用的元数据
+        if on_used_instructions and used_meta.get("instruction_type") is not None:
+            try:
+                on_used_instructions(dict(used_meta))
+            except Exception as _e:
+                print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
+
         async for partial_reply in use_caller.get_stream_response(messages, use_model, timeout=timeout):
             chunk_count += 1
             total_chars += len(partial_reply)
@@ -205,7 +209,8 @@ class AICompletionPort:
         print("🤖" + "="*48)
 
     async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
-                                             max_retries=3, timeout=60, session_context_source=None) -> AsyncGenerator[str, None]:
+                                             max_retries=3, timeout=60, session_context_source=None,
+                                             on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None) -> AsyncGenerator[str, None]:
         """
         带重试机制的流式生成AI回复
         
@@ -216,6 +221,7 @@ class AICompletionPort:
             max_retries: 最大重试次数，默认3次
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
+            on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅在成功的那次尝试触发一次）
             
         Yields:
             str: 每个流式回复片段
@@ -240,7 +246,18 @@ class AICompletionPort:
 
                 print(f"🚀 本次尝试使用提供方: {provider} | 模型: {model_env}")
 
+                # 仅在成功开始产出内容后再对上层触发回调，避免失败尝试污染
+                used_meta_candidate: Dict[str, Any] = {}
+                def _capture_used_instructions(meta: Dict[str, Any]) -> None:
+                    # 记录候选元数据，稍后在首次产出时统一上报
+                    used_meta_candidate.clear()
+                    used_meta_candidate.update(meta or {})
+                    # 增补 provider/model
+                    used_meta_candidate["provider"] = provider
+                    used_meta_candidate["model"] = model_env
+
                 # 使用统一的超时策略（两边 caller 都使用 total=timeout）
+                first_chunk_sent = False
                 async for chunk in self.generate_reply_stream(
                     role_data=role_data,
                     history=history,
@@ -248,8 +265,17 @@ class AICompletionPort:
                     timeout=timeout,
                     session_context_source=session_context_source,
                     caller=caller,
-                    model_name=model_env
+                    model_name=model_env,
+                    on_used_instructions=_capture_used_instructions
                 ):
+                    if not first_chunk_sent:
+                        # 首次产出内容时再把本次尝试的元数据上报给调用方
+                        if on_used_instructions and used_meta_candidate:
+                            try:
+                                on_used_instructions(dict(used_meta_candidate))
+                            except Exception as _e:
+                                print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
+                        first_chunk_sent = True
                     yield chunk
 
                 # 成功生成，退出重试循环
@@ -288,21 +314,9 @@ class AICompletionPort:
             return self.grok
         return None
     
-    def get_last_used_instructions(self) -> dict:
-        """
-        获取最近一次AI生成时使用的指令信息
-        
-        Returns:
-            dict: {
-                "system_instructions": str | None,
-                "ongoing_instructions": str | None, 
-                "turn_count": int | None
-            }
-        """
-        return self.last_used_instructions.copy()
+    # get_last_used_instructions 已废弃（移除）
 
 
 # ✅ 全局唯一实例（临时占位，实际使用时应通过容器获取）
-# 注意：这个实例在初始化时会报错，因为没有提供 gpt_caller
 # 在应用启动时，应该通过容器创建并替换这个实例
 ai_completion_port = None  # 将在容器中初始化

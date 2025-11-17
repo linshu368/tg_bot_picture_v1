@@ -246,24 +246,32 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
     try:
         # 使用流式生成并收集完整回复
         reply = ""
+        used_instructions_meta: Dict[str, Any] = {}
+        def _on_used_instructions(meta: Dict[str, Any]) -> None:
+            try:
+                used_instructions_meta.clear()
+                if isinstance(meta, dict):
+                    used_instructions_meta.update(meta)
+            except Exception:
+                pass
         async for chunk in ai_completion_port.generate_reply_stream_with_retry(
             role_data=role_data,
             history=history,
             user_input=content,
-            session_context_source=context_source
+            session_context_source=context_source,
+            on_used_instructions=_on_used_instructions
         ):
             reply += chunk
             
         # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令）
         if message_service.message_repository:
             try:
-                used_instructions = ai_completion_port.get_last_used_instructions()
-                system_instructions = used_instructions.get("system_instructions")
-                ongoing_instructions = used_instructions.get("ongoing_instructions")
+                system_instructions = used_instructions_meta.get("system_instructions")
+                ongoing_instructions = used_instructions_meta.get("ongoing_instructions")
                 
                 if system_instructions or ongoing_instructions:
                     # 获取会话信息
-                    session_info = await session_service.get_session(user_id)
+                    session_info = await session_service.get_session(session_id)
                     if session_info:
                         role_id_for_save = session_info.get("role_id")
                         # 异步保存带指令的用户消息（不阻塞主流程）
