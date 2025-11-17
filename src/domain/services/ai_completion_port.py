@@ -155,6 +155,8 @@ class AICompletionPort:
                 messages[last_user_msg_index]["content"] = enhanced_content
                 used_meta["instruction_type"] = "system"
                 used_meta["system_instructions"] = used_instruction
+                # 🆕 新字段写入逻辑：记录本轮实际使用的指令（供上层存入 messages.instructions）
+                used_meta["instructions"] = used_instruction
                 print(f"✅ 已为第{user_turn_count}轮对话添加系统增强指令（流式）")
         elif user_turn_count >= 4 and messages:
             # 第4轮及以后：使用持续指令
@@ -169,6 +171,8 @@ class AICompletionPort:
                 messages[last_user_msg_index]["content"] = enhanced_content
                 used_meta["instruction_type"] = "ongoing"
                 used_meta["ongoing_instructions"] = used_instruction
+                # 🆕 新字段写入逻辑：记录本轮实际使用的指令（供上层存入 messages.instructions）
+                used_meta["instructions"] = used_instruction
                 print(f"✅ 已为第{user_turn_count}轮对话添加持续增强指令（流式）")
         
         print(f"🔧 构建完整消息列表 | 总消息数: {len(messages)}")
@@ -189,6 +193,19 @@ class AICompletionPort:
         use_model = model_name
         if use_caller is None:
             raise RuntimeError("未配置任何可用的AI调用器（Grok/Novel）")
+
+        # 🆕 新字段写入逻辑：补充回调元数据（模型名与本次调用的上下文载荷）
+        try:
+            used_meta["model_name"] = model_name
+            used_meta["prompt_payload"] = {
+                "system_prompt": role_data.get("system_prompt") if isinstance(role_data, dict) else None,
+                "history": history,
+                "user_input": user_input,
+                "instructions": used_meta.get("instructions"),
+                "instruction_type": used_meta.get("instruction_type")
+            }
+        except Exception:
+            pass
 
         # 在开始流式之前，回调一次提供指令使用的元数据
         if on_used_instructions and used_meta.get("instruction_type") is not None:

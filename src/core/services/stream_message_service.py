@@ -1,5 +1,6 @@
 # stream_message_service.py - 流式消息处理服务（应用核心层）
 import time
+import json
 from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, Optional
@@ -204,6 +205,44 @@ class StreamMessageService:
                     try:
                         system_instructions = used_instructions_meta.get("system_instructions")
                         ongoing_instructions = used_instructions_meta.get("ongoing_instructions")
+                        # 🆕 新字段写入逻辑：确定本轮实际使用的 instructions（非简单拼接，按真实使用选择其一）
+                        instruction_type = used_instructions_meta.get("instruction_type")
+                        instructions = used_instructions_meta.get("instructions")
+                        if instructions is None:
+                            # 兼容旧回调，仅在未显式提供 instructions 时按类型选择
+                            if instruction_type == "system":
+                                instructions = system_instructions
+                            elif instruction_type == "ongoing":
+                                instructions = ongoing_instructions
+                            else:
+                                # 未识别类型则择优取其一
+                                instructions = system_instructions or ongoing_instructions
+                        
+                        # 🆕 新字段写入逻辑：模型名称
+                        model_name = used_instructions_meta.get("model_name") or used_instructions_meta.get("model")
+                        
+                        # 🆕 新字段写入逻辑：history（本次实际投喂上下文），优先使用回调给到的结构；否则最小可用兜底
+                        prompt_payload = used_instructions_meta.get("prompt_payload")
+                        if not isinstance(prompt_payload, dict):
+                            prompt_payload = {
+                                "system_prompt": role_data.get("system_prompt") if isinstance(role_data, dict) else None,
+                                "history": history,
+                                "user_input": content,
+                                "instructions": instructions,
+                                "instruction_type": instruction_type
+                            }
+                        try:
+                            history_json_str = json.dumps(prompt_payload, ensure_ascii=False)
+                        except Exception:
+                            # 兜底序列化
+                            history_json_str = json.dumps({"fallback": True}, ensure_ascii=False)
+                        
+                        # 🆕 新字段写入逻辑：round（以 session 维度的用户消息序号计算）
+                        try:
+                            current_history = message_service.get_history(session_id) or []
+                            round_num = sum(1 for m in current_history if isinstance(m, dict) and m.get("role") == "user")
+                        except Exception:
+                            round_num = None
                         
                         if system_instructions or ongoing_instructions:
                             # 获取session_id中的user_id和role_id
@@ -221,7 +260,14 @@ class StreamMessageService:
                                             session_id=session_id,
                                             message=content,
                                             system_instructions=system_instructions,
-                                            ongoing_instructions=ongoing_instructions
+                                            ongoing_instructions=ongoing_instructions,
+                                            # 🆕 新字段写入逻辑（与旧字段并存，后续可移除旧字段）
+                                            instructions=instructions,
+                                            bot_reply=self._safe_text_for_telegram(accumulated_text),
+                                            history=history_json_str,
+                                            model_name=model_name,
+                                            user_input=content,
+                                            round=round_num
                                         )
                                         self.logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}")
                             except Exception as inner_e:
@@ -393,9 +439,4 @@ class StreamMessageService:
             }
         }
     
-
-
-# 全局单例实例（临时占位，实际使用时应通过容器获取）
-# 注意：这个实例在初始化时可能缺少依赖
-# 在应用启动时，应该通过容器创建并替换这个实例
 stream_message_service = None  # 将在容器中初始化

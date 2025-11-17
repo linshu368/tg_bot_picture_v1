@@ -22,7 +22,14 @@ class SupabaseMessageRepository:
     async def save_message(self, user_id: str, role_id: Optional[str], session_id: str, 
                           message: str, sender: str,
                           system_instructions: Optional[str] = None,
-                          ongoing_instructions: Optional[str] = None) -> Optional[str]:
+                          ongoing_instructions: Optional[str] = None,
+                          # 🆕 新字段写入逻辑（过渡期与旧字段并存）
+                          instructions: Optional[str] = None,
+                          bot_reply: Optional[str] = None,
+                          history: Optional[str] = None,
+                          model_name: Optional[str] = None,
+                          user_input: Optional[str] = None,
+                          round: Optional[int] = None) -> Optional[str]:
         """
         保存消息到Supabase
         
@@ -65,6 +72,20 @@ class SupabaseMessageRepository:
                 "ongoing_instructions": ongoing_instructions
                 # timestamp 和 last_interaction 由数据库触发器自动设置为东八区时间
             }
+            # 🆕 新字段写入逻辑：按有值追加至入库载荷（与旧字段并存，后续可移除旧字段）
+            # 注意：这些字段主要随“用户行（sender='user'）”一并保存
+            if instructions is not None:
+                message_data["instructions"] = instructions
+            if bot_reply is not None:
+                message_data["bot_reply"] = bot_reply
+            if history is not None:
+                message_data["history"] = history
+            if model_name is not None:
+                message_data["model_name"] = model_name
+            if user_input is not None:
+                message_data["user_input"] = user_input
+            if round is not None:
+                message_data["round"] = round
             
             # 异步插入数据（使用线程池避免阻塞主线程）
             def _sync_insert():
@@ -222,7 +243,14 @@ class SupabaseMessageRepository:
     def save_user_message_with_real_instructions_async(self, user_id: str, role_id: Optional[str], 
                                                       session_id: str, message: str,
                                                       system_instructions: Optional[str] = None,
-                                                      ongoing_instructions: Optional[str] = None) -> asyncio.Task:
+                                                      ongoing_instructions: Optional[str] = None,
+                                                      # 🆕 新字段写入逻辑（过渡期与旧字段并存）
+                                                      instructions: Optional[str] = None,
+                                                      bot_reply: Optional[str] = None,
+                                                      history: Optional[str] = None,
+                                                      model_name: Optional[str] = None,
+                                                      user_input: Optional[str] = None,
+                                                      round: Optional[int] = None) -> asyncio.Task:
         """
         异步保存用户消息（使用AI生成时的真实指令内容）
         
@@ -248,7 +276,14 @@ class SupabaseMessageRepository:
                     message=message,
                     sender="user",
                     system_instructions=system_instructions,
-                    ongoing_instructions=ongoing_instructions
+                    ongoing_instructions=ongoing_instructions,
+                    # 🆕 新字段写入逻辑：透传到基础保存方法
+                    instructions=instructions,
+                    bot_reply=bot_reply,
+                    history=history,
+                    model_name=model_name,
+                    user_input=user_input,
+                    round=round
                 )
                 
                 if result:
