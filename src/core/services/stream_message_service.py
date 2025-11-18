@@ -165,7 +165,8 @@ class StreamMessageService:
                 history=history,
                 user_input=content,
                 session_context_source=context_source,
-                on_used_instructions=_on_used_instructions
+                on_used_instructions=_on_used_instructions,
+                apply_enhancement=False
             ):
                 # 对大块进行字符级分割处理
                 await self._process_chunk_with_granular_control(
@@ -221,18 +222,21 @@ class StreamMessageService:
                         # 🆕 新字段写入逻辑：模型名称
                         model_name = used_instructions_meta.get("model_name") or used_instructions_meta.get("model")
                         
-                        # 🆕 新字段写入逻辑：history（本次实际投喂上下文），优先使用回调给到的结构；否则最小可用兜底
-                        prompt_payload = used_instructions_meta.get("prompt_payload")
-                        if not isinstance(prompt_payload, dict):
-                            prompt_payload = {
-                                "system_prompt": role_data.get("system_prompt") if isinstance(role_data, dict) else None,
-                                "history": history,
-                                "user_input": content,
-                                "instructions": instructions,
-                                "instruction_type": instruction_type
-                            }
+                        # 🆕 新字段写入逻辑：history（100%复现）
+                        # 优先使用回调给到的 final_messages；否则按当前逻辑构造
+                        final_messages = used_instructions_meta.get("final_messages")
+                        if not isinstance(final_messages, list) or not final_messages:
+                            # 构造尽量接近的 messages（兜底）
+                            constructed = []
+                            if isinstance(role_data, dict) and role_data.get("system_prompt"):
+                                constructed.append({"role": "system", "content": role_data.get("system_prompt")})
+                            if context_source != "snapshot" and isinstance(role_data, dict) and role_data.get("history"):
+                                constructed.extend(role_data.get("history") or [])
+                            constructed.extend(history or [])
+                            final_messages = constructed
+                        # 仅将 final_messages 作为 JSON 字符串写入 history，model_name 单独写入字段
                         try:
-                            history_json_str = json.dumps(prompt_payload, ensure_ascii=False)
+                            history_json_str = json.dumps(final_messages, ensure_ascii=False)
                         except Exception:
                             # 兜底序列化
                             history_json_str = json.dumps({"fallback": True}, ensure_ascii=False)
@@ -361,8 +365,17 @@ class StreamMessageService:
             session = await session_service.get_or_create_session(user_id)
             session_id = session["session_id"]
             
-            # 保存用户消息
-            user_message_id = message_service.save_message(session_id, "user", content)
+            # 保存用户消息（先增强后保存）
+            try:
+                from src.utils.enhance import enhance_user_input
+                prev_history = message_service.get_history(session_id) or []
+                prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
+                current_turn_index = prev_user_turns + 1
+                instruction_type = "system" if current_turn_index <= 3 else "ongoing"
+                enhanced_content, _ = enhance_user_input(content, instruction_type, user_context=content)
+            except Exception:
+                enhanced_content = content
+            user_message_id = message_service.save_message(session_id, "user", enhanced_content)
             
             # 保存Bot的限制提示回复
             limit_message = "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！"
@@ -407,7 +420,17 @@ class StreamMessageService:
    
 
         # 保存用户消息并获取历史
-        user_message_id = message_service.save_message(session_id, "user", content)
+        # 先读取当前历史以判断本轮使用的指令类型
+        from src.utils.enhance import enhance_user_input
+        prev_history = message_service.get_history(session_id) or []
+        try:
+            prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
+        except Exception:
+            prev_user_turns = 0
+        current_turn_index = prev_user_turns + 1
+        instruction_type = "system" if current_turn_index <= 3 else "ongoing"
+        enhanced_content, _used_instruction = enhance_user_input(content, instruction_type, user_context=content)
+        user_message_id = message_service.save_message(session_id, "user", enhanced_content)
         history = message_service.get_history(session_id)
         # 清洗历史消息内容，确保与展示一致
         cleaned_history = []

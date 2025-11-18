@@ -244,7 +244,8 @@ class MessageService:
             role_data=role_data,
             history=history,
             user_input=user_input,
-            session_context_source=session_context_source
+            session_context_source=session_context_source,
+            apply_enhancement=False
         ):
             reply += chunk
         logger.info(f"[DEBUG] regenerate_reply: new reply={reply}")

@@ -187,8 +187,17 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
         session = await session_service.get_or_create_session(user_id)
         session_id = session["session_id"]
         
-        # 保存用户消息
-        user_message_id = message_service.save_message(session_id, "user", content)
+        # 保存用户消息（先增强后保存）
+        try:
+            from src.utils.enhance import enhance_user_input
+            prev_history = message_service.get_history(session_id) or []
+            prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
+            current_turn_index = prev_user_turns + 1
+            instruction_type = "system" if current_turn_index <= 3 else "ongoing"
+            enhanced_content, _ = enhance_user_input(content, instruction_type, user_context=content)
+        except Exception:
+            enhanced_content = content
+        user_message_id = message_service.save_message(session_id, "user", enhanced_content)
         
         # 保存Bot的限制提示回复
         limit_message = "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！"
@@ -236,8 +245,17 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
         logger.error(f"❌ 角色配置错误: 默认角色也不存在")
         return envelope_error(4001, "角色配置错误")
 
-    # 4. 保存用户消息并生成回复
-    user_message_id = message_service.save_message(session_id, "user", content)
+    # 4. 保存用户消息并生成回复（先增强后保存）
+    try:
+        from src.utils.enhance import enhance_user_input
+        prev_history = message_service.get_history(session_id) or []
+        prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
+        current_turn_index = prev_user_turns + 1
+        instruction_type = "system" if current_turn_index <= 3 else "ongoing"
+        enhanced_content, _ = enhance_user_input(content, instruction_type, user_context=content)
+    except Exception:
+        enhanced_content = content
+    user_message_id = message_service.save_message(session_id, "user", enhanced_content)
     history = message_service.get_history(session_id)
     
     # 获取会话上下文来源（判断是否为快照会话）
@@ -259,21 +277,39 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
             history=history,
             user_input=content,
             session_context_source=context_source,
-            on_used_instructions=_on_used_instructions
+            on_used_instructions=_on_used_instructions,
+            apply_enhancement=False
         ):
             reply += chunk
             
-        # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令）
+        # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令 + 100%复现的history）
         if message_service.message_repository:
             try:
                 system_instructions = used_instructions_meta.get("system_instructions")
                 ongoing_instructions = used_instructions_meta.get("ongoing_instructions")
+                instruction_type = used_instructions_meta.get("instruction_type")
                 
                 if system_instructions or ongoing_instructions:
                     # 获取会话信息
                     session_info = await session_service.get_session(session_id)
                     if session_info:
                         role_id_for_save = session_info.get("role_id")
+                        # 100%复现：final_messages 与模型名
+                        model_name = used_instructions_meta.get("model_name") or used_instructions_meta.get("model")
+                        final_messages = used_instructions_meta.get("final_messages")
+                        if not isinstance(final_messages, list) or not final_messages:
+                            constructed = []
+                            if isinstance(role_data, dict) and role_data.get("system_prompt"):
+                                constructed.append({"role": "system", "content": role_data.get("system_prompt")})
+                            if context_source != "snapshot" and isinstance(role_data, dict) and role_data.get("history"):
+                                constructed.extend(role_data.get("history") or [])
+                            constructed.extend(history or [])
+                            final_messages = constructed
+                        try:
+                            import json
+                            history_json_str = json.dumps(final_messages, ensure_ascii=False)
+                        except Exception:
+                            history_json_str = None
                         # 异步保存带指令的用户消息（不阻塞主流程）
                         message_service.message_repository.save_user_message_with_real_instructions_async(
                             user_id=str(user_id),
@@ -281,7 +317,11 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
                             session_id=session_id,
                             message=content,
                             system_instructions=system_instructions,
-                            ongoing_instructions=ongoing_instructions
+                            ongoing_instructions=ongoing_instructions,
+                            history=history_json_str,
+                            model_name=model_name,
+                            user_input=content,
+                            bot_reply=reply
                         )
                         logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}")
             except Exception as e:

@@ -199,7 +199,8 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 history=history,
                 user_input=user_input,
                 session_context_source=context_source,
-                on_used_instructions=_on_used_instructions
+                on_used_instructions=_on_used_instructions,
+                apply_enhancement=False
             ):
                 # 对大块进行字符级分割处理（复用StreamMessageService的逻辑）
                 await self._process_chunk_with_granular_control(
@@ -237,6 +238,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                     try:
                         system_instructions = used_instructions_meta.get("system_instructions")
                         ongoing_instructions = used_instructions_meta.get("ongoing_instructions")
+                        instruction_type = used_instructions_meta.get("instruction_type")
                         
                         if system_instructions or ongoing_instructions:
                             # 获取session_id中的user_id和role_id
@@ -247,6 +249,25 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                                     role_id = session_info.get("role_id")
                                     
                                     if user_id:
+                                        # 100%复现：final_messages 与模型名
+                                        model_name = used_instructions_meta.get("model_name") or used_instructions_meta.get("model")
+                                        final_messages = used_instructions_meta.get("final_messages")
+                                        if not isinstance(final_messages, list) or not final_messages:
+                                            # 兜底构造
+                                            constructed = []
+                                            if isinstance(role_data, dict) and role_data.get("system_prompt"):
+                                                constructed.append({"role": "system", "content": role_data.get("system_prompt")})
+                                            if context_source != "snapshot" and isinstance(role_data, dict) and role_data.get("history"):
+                                                constructed.extend(role_data.get("history") or [])
+                                            # 使用当前截断后的 history
+                                            constructed.extend(history or [])
+                                            final_messages = constructed
+                                        try:
+                                            import json
+                                            history_json_str = json.dumps(final_messages, ensure_ascii=False)
+                                        except Exception:
+                                            history_json_str = None
+                                        
                                         # 异步保存带指令的用户消息（不阻塞主流程）
                                         self.message_service.message_repository.save_user_message_with_real_instructions_async(
                                             user_id=str(user_id),
@@ -254,7 +275,11 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                                             session_id=session_id,
                                             message=user_input,
                                             system_instructions=system_instructions,
-                                            ongoing_instructions=ongoing_instructions
+                                            ongoing_instructions=ongoing_instructions,
+                                            history=history_json_str,
+                                            model_name=model_name,
+                                            user_input=user_input,
+                                            bot_reply=self._safe_text_for_telegram(accumulated_text)
                                         )
                                         self.logger.info(f"🔄 已异步保存带指令的用户消息(重新生成): session_id={session_id}")
                             except Exception as inner_e:

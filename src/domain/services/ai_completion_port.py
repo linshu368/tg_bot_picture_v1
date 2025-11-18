@@ -76,28 +76,13 @@ class AICompletionPort:
         Returns:
             tuple: (增强后的消息内容, 使用的指令内容)
         """
-        if instruction_type == "system":
-            # 前3轮：使用系统指令
-            instructions = os.getenv('SYSTEM_INSTRUCTIONS', '')
-            enhanced_content = self.early_conversation_instruction.format(
-                user_context=user_context,
-                system_instructions=instructions
-            )
-            print(f"✨ 用户消息已增强(系统指令) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
-            return enhanced_content, instructions if instructions else None
-        elif instruction_type == "ongoing":
-            # 第4轮及以后：使用持续指令
-            instructions = os.getenv('ONGOING_INSTRUCTIONS', '')
-            enhanced_content = self.ongoing_conversation_instruction.format(
-                user_context=user_context,
-                ongoing_instructions=instructions
-            )
-            print(f"✨ 用户消息已增强(持续指令) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
-            return enhanced_content, instructions if instructions else None
-        else:
-            raise ValueError(f"不支持的指令类型: {instruction_type}")
+        # 代理到公共 util，保持单一实现
+        from src.utils.enhance import enhance_user_input
+        enhanced_content, instructions = enhance_user_input(original_content, instruction_type, user_context=user_context)
+        print(f"✨ 用户消息已增强({instruction_type}) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
+        return enhanced_content, instructions if instructions else None
 
-    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None, on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None) -> AsyncGenerator[str, None]:
+    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None, on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None, apply_enhancement: bool = False) -> AsyncGenerator[str, None]:
         """
         流式生成AI回复 - 返回异步生成器，用于Telegram Bot的流式更新
         
@@ -108,6 +93,7 @@ class AICompletionPort:
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
             on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅调用一次）
+            apply_enhancement: 是否在本方法中对最后一条用户消息做指令增强（默认 False）
             
         Yields:
             str: 每个流式回复片段
@@ -152,12 +138,14 @@ class AICompletionPort:
                     original_content,
                     instruction_type="system"
                 )
-                messages[last_user_msg_index]["content"] = enhanced_content
+                if apply_enhancement:
+                    messages[last_user_msg_index]["content"] = enhanced_content
                 used_meta["instruction_type"] = "system"
                 used_meta["system_instructions"] = used_instruction
                 # 🆕 新字段写入逻辑：记录本轮实际使用的指令（供上层存入 messages.instructions）
                 used_meta["instructions"] = used_instruction
-                print(f"✅ 已为第{user_turn_count}轮对话添加系统增强指令（流式）")
+                if apply_enhancement:
+                    print(f"✅ 已为第{user_turn_count}轮对话添加系统增强指令（流式）")
         elif user_turn_count >= 4 and messages:
             # 第4轮及以后：使用持续指令
             last_user_msg_index = self._find_last_user_message_index(messages)
@@ -168,12 +156,14 @@ class AICompletionPort:
                     original_content,
                     instruction_type="ongoing"
                 )
-                messages[last_user_msg_index]["content"] = enhanced_content
+                if apply_enhancement:
+                    messages[last_user_msg_index]["content"] = enhanced_content
                 used_meta["instruction_type"] = "ongoing"
                 used_meta["ongoing_instructions"] = used_instruction
                 # 🆕 新字段写入逻辑：记录本轮实际使用的指令（供上层存入 messages.instructions）
                 used_meta["instructions"] = used_instruction
-                print(f"✅ 已为第{user_turn_count}轮对话添加持续增强指令（流式）")
+                if apply_enhancement:
+                    print(f"✅ 已为第{user_turn_count}轮对话添加持续增强指令（流式）")
         
         print(f"🔧 构建完整消息列表 | 总消息数: {len(messages)}")
         print("🧠" + "="*48)
@@ -197,12 +187,16 @@ class AICompletionPort:
         # 🆕 新字段写入逻辑：补充回调元数据（模型名与本次调用的上下文载荷）
         try:
             used_meta["model_name"] = model_name
+            # 100% 复现：记录本次实际投喂的完整 messages
+            used_meta["final_messages"] = list(messages)
             used_meta["prompt_payload"] = {
                 "system_prompt": role_data.get("system_prompt") if isinstance(role_data, dict) else None,
                 "history": history,
                 "user_input": user_input,
                 "instructions": used_meta.get("instructions"),
-                "instruction_type": used_meta.get("instruction_type")
+                "instruction_type": used_meta.get("instruction_type"),
+                # 兼容旧字段的同时，加入最终 messages
+                "final_messages": list(messages)
             }
         except Exception:
             pass
@@ -227,7 +221,8 @@ class AICompletionPort:
 
     async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
                                              max_retries=3, timeout=60, session_context_source=None,
-                                             on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None) -> AsyncGenerator[str, None]:
+                                             on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None,
+                                             apply_enhancement: bool = False) -> AsyncGenerator[str, None]:
         """
         带重试机制的流式生成AI回复
         
@@ -239,6 +234,7 @@ class AICompletionPort:
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
             on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅在成功的那次尝试触发一次）
+            apply_enhancement: 是否在本方法中对最后一条用户消息做指令增强（默认 False）
             
         Yields:
             str: 每个流式回复片段
@@ -283,7 +279,8 @@ class AICompletionPort:
                     session_context_source=session_context_source,
                     caller=caller,
                     model_name=model_env,
-                    on_used_instructions=_capture_used_instructions
+                    on_used_instructions=_capture_used_instructions,
+                    apply_enhancement=apply_enhancement
                 ):
                     if not first_chunk_sent:
                         # 首次产出内容时再把本次尝试的元数据上报给调用方
