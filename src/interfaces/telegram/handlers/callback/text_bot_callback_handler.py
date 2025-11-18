@@ -230,7 +230,14 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 except Exception as e:
                     self.logger.error(f"重新生成最终更新消息失败: {e}")
                 
-                # 保存完整回复到数据库
+                # 先删除旧的机器人回复（保持 user-bot 严格交替）
+                try:
+                    if self.message_service.message_repository:
+                        await self.message_service.message_repository.delete_last_bot_message(session_id)
+                except Exception as e:
+                    self.logger.debug(f"删除旧机器人消息失败(重新生成): {e}")
+                
+                # 保存新的完整回复到数据库
                 self.message_service.save_message(session_id, "assistant", accumulated_text)
                 
                 # 🆕 AI重新生成完成后，获取实际使用的指令并保存用户消息（带指令）
@@ -268,20 +275,14 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                                         except Exception:
                                             history_json_str = None
                                         
-                                        # 异步保存带指令的用户消息（不阻塞主流程）
-                                        self.message_service.message_repository.save_user_message_with_real_instructions_async(
-                                            user_id=str(user_id),
-                                            role_id=str(role_id) if role_id else None,
+                                        # 覆盖最新一条用户消息的 bot_reply/history/model（不新增用户行）
+                                        await self.message_service.message_repository.update_last_user_message_reply(
                                             session_id=session_id,
-                                            message=user_input,
-                                            system_instructions=system_instructions,
-                                            ongoing_instructions=ongoing_instructions,
+                                            bot_reply=self._safe_text_for_telegram(accumulated_text),
                                             history=history_json_str,
-                                            model_name=model_name,
-                                            user_input=user_input,
-                                            bot_reply=self._safe_text_for_telegram(accumulated_text)
+                                            model_name=model_name
                                         )
-                                        self.logger.info(f"🔄 已异步保存带指令的用户消息(重新生成): session_id={session_id}")
+                                        self.logger.info(f"🔄 已覆盖最新用户消息的回复(重新生成): session_id={session_id}")
                             except Exception as inner_e:
                                 self.logger.error(f"❌ 获取会话信息失败(重新生成): {inner_e}")
                     except Exception as e:

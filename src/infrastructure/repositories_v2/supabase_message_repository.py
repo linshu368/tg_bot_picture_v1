@@ -296,6 +296,80 @@ class SupabaseMessageRepository:
         
         return asyncio.create_task(_safe_save())
     
+    async def _get_last_message_by_sender(self, session_id: str, sender: str) -> Optional[Dict[str, Any]]:
+        """获取某会话中指定sender的最新一条消息"""
+        try:
+            client = self.supabase_manager.get_client()
+            def _sync_select_last():
+                return client.table(self.table_name)\
+                    .select("id")\
+                    .eq("session_id", session_id)\
+                    .eq("sender", sender)\
+                    .order("timestamp", desc=True)\
+                    .limit(1)\
+                    .execute()
+            result = await asyncio.to_thread(_sync_select_last)
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取最新消息失败: session_id={session_id}, sender={sender}, err={e}")
+            return None
+    
+    async def delete_last_bot_message(self, session_id: str) -> bool:
+        """删除会话中最新一条机器人消息（用于重新生成时清理旧回复）"""
+        try:
+            last_bot = await self._get_last_message_by_sender(session_id, "bot")
+            if not last_bot:
+                return True
+            msg_id = last_bot.get("id")
+            client = self.supabase_manager.get_client()
+            def _sync_delete():
+                return client.table(self.table_name)\
+                    .delete()\
+                    .eq("id", msg_id)\
+                    .execute()
+            await asyncio.to_thread(_sync_delete)
+            self.logger.info(f"🗑️ 已删除最新机器人消息: session_id={session_id}, id={msg_id}")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ 删除最新机器人消息失败: session_id={session_id}, err={e}")
+            return False
+    
+    async def update_last_user_message_reply(self, session_id: str, 
+                                            bot_reply: Optional[str] = None,
+                                            history: Optional[str] = None,
+                                            model_name: Optional[str] = None) -> bool:
+        """
+        更新会话中最新一条用户消息的回复相关字段（用于重新生成时覆盖旧 bot_reply/history/model）
+        """
+        try:
+            last_user = await self._get_last_message_by_sender(session_id, "user")
+            if not last_user:
+                return False
+            msg_id = last_user.get("id")
+            payload: Dict[str, Any] = {}
+            if bot_reply is not None:
+                payload["bot_reply"] = bot_reply
+            if history is not None:
+                payload["history"] = history
+            if model_name is not None:
+                payload["model_name"] = model_name
+            if not payload:
+                return True
+            client = self.supabase_manager.get_client()
+            def _sync_update():
+                return client.table(self.table_name)\
+                    .update(payload)\
+                    .eq("id", msg_id)\
+                    .execute()
+            await asyncio.to_thread(_sync_update)
+            self.logger.info(f"✏️ 已更新最新用户消息: session_id={session_id}, id={msg_id}, fields={list(payload.keys())}")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ 更新最新用户消息失败: session_id={session_id}, err={e}")
+            return False
+    
     def save_bot_message_async(self, user_id: str, role_id: Optional[str], 
                               session_id: str, message: str) -> asyncio.Task:
         """

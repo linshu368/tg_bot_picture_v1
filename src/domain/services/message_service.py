@@ -240,19 +240,61 @@ class MessageService:
 
         # 3. 重新生成 AI 回复（使用流式生成并收集完整回复）
         reply = ""
+        used_instructions_meta: Dict[str, Any] = {}
+        def _on_used_instructions(meta: Dict[str, Any]) -> None:
+            try:
+                used_instructions_meta.clear()
+                if isinstance(meta, dict):
+                    used_instructions_meta.update(meta)
+            except Exception:
+                pass
         async for chunk in ai_port.generate_reply_stream_with_retry(
             role_data=role_data,
             history=history,
             user_input=user_input,
             session_context_source=session_context_source,
+            on_used_instructions=_on_used_instructions,
             apply_enhancement=False
         ):
             reply += chunk
         logger.info(f"[DEBUG] regenerate_reply: new reply={reply}")
 
-        # 4. 保存新的 Bot 回复
+        # 4. 删除旧的 Bot 回复并保存新的 Bot 回复（保持严格 user-bot 交替）
+        try:
+            if self.message_repository:
+                await self.message_repository.delete_last_bot_message(session_id)
+        except Exception as e:
+            logger.debug(f"删除旧机器人消息失败(regenerate): {e}")
         bot_message_id = self.save_message(session_id, "assistant", reply)
         logger.info(f"[DEBUG] regenerate_reply: saved new bot_message_id={bot_message_id}")
+        
+        # 4.1 覆盖最新用户消息中的 bot_reply/history/model（不新增用户行）
+        try:
+            if self.message_repository:
+                model_name = used_instructions_meta.get("model_name") or used_instructions_meta.get("model")
+                final_messages = used_instructions_meta.get("final_messages")
+                if not isinstance(final_messages, list) or not final_messages:
+                    # 兜底构造
+                    constructed = []
+                    if isinstance(role_data, dict) and role_data.get("system_prompt"):
+                        constructed.append({"role": "system", "content": role_data.get("system_prompt")})
+                    if session_context_source != "snapshot" and isinstance(role_data, dict) and role_data.get("history"):
+                        constructed.extend(role_data.get("history") or [])
+                    constructed.extend(history or [])
+                    final_messages = constructed
+                import json
+                try:
+                    history_json_str = json.dumps(final_messages, ensure_ascii=False)
+                except Exception:
+                    history_json_str = None
+                await self.message_repository.update_last_user_message_reply(
+                    session_id=session_id,
+                    bot_reply=reply,
+                    history=history_json_str,
+                    model_name=model_name
+                )
+        except Exception as e:
+            logger.debug(f"覆盖最新用户消息失败(regenerate): {e}")
         
         # 额外打印重新生成的回复信息
         print(f"🔄 重新生成回复 | Session: {session_id} | 基于用户消息ID: {last_message_id}")
