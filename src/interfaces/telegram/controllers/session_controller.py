@@ -288,8 +288,16 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
                 system_instructions = used_instructions_meta.get("system_instructions")
                 ongoing_instructions = used_instructions_meta.get("ongoing_instructions")
                 instruction_type = used_instructions_meta.get("instruction_type")
+                instructions = used_instructions_meta.get("instructions")
                 
-                if system_instructions or ongoing_instructions:
+                # 兼容处理：如果instructions为空，按类型选择
+                if instructions is None:
+                    if instruction_type == "system":
+                        instructions = system_instructions
+                    elif instruction_type == "ongoing":
+                        instructions = ongoing_instructions
+                
+                if instructions:
                     # 获取会话信息
                     session_info = await session_service.get_session(session_id)
                     if session_info:
@@ -310,14 +318,12 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
                             history_json_str = json.dumps(final_messages, ensure_ascii=False)
                         except Exception:
                             history_json_str = None
-                        # 异步保存带指令的用户消息（不阻塞主流程）
+                        # 异步保存用户消息（不阻塞主流程）
                         message_service.message_repository.save_user_message_with_real_instructions_async(
                             user_id=str(user_id),
                             role_id=str(role_id_for_save) if role_id_for_save else None,
                             session_id=session_id,
-                            message=content,
-                            system_instructions=system_instructions,
-                            ongoing_instructions=ongoing_instructions,
+                            instructions=instructions,
                             history=history_json_str,
                             model_name=model_name,
                             user_input=content,

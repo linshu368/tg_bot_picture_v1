@@ -65,14 +65,11 @@ class MessageService:
             # 转换role格式：assistant -> bot
             sender = "bot" if role == "assistant" else "user"
             
-            # 保存到Supabase
-            await self.message_repository.save_message(
-                user_id=user_id,
-                role_id=role_id,
-                session_id=session_id,
-                message=content,
-                sender=sender
-            )
+            # 新策略（单行单轮）：bot 回复不再单独入库，避免产生 bot-only 行
+            # 最终持久化通过 save_user_message_with_real_instructions_async（写整轮）
+            # 或通过 update_last_user_message_reply（覆盖最新一轮的回复字段）完成
+            if sender == "bot":
+                return
             
             self.logger.info(f"✅ 消息已异步保存到Supabase: session_id={session_id}, sender={sender}, user_id={user_id}, role_id={role_id}")
             

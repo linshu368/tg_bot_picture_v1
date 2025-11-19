@@ -20,10 +20,8 @@ class SupabaseMessageRepository:
         self.table_name = "messages"
     
     async def save_message(self, user_id: str, role_id: Optional[str], session_id: str, 
-                          message: str, sender: str,
-                          system_instructions: Optional[str] = None,
-                          ongoing_instructions: Optional[str] = None,
-                          # 🆕 新字段写入逻辑（过渡期与旧字段并存）
+                          sender: str,
+                          # 🆕 新字段写入逻辑
                           instructions: Optional[str] = None,
                           bot_reply: Optional[str] = None,
                           history: Optional[str] = None,
@@ -37,10 +35,13 @@ class SupabaseMessageRepository:
             user_id: 用户ID (TEXT格式，如Telegram用户ID)
             role_id: 角色ID (TEXT格式，可为None) 
             session_id: 会话ID (TEXT格式，如sess_xxxxxxxx)
-            message: 消息内容
             sender: 发送者 ('user' 或 'bot')
-            system_instructions: 系统指令（前3轮用户消息使用）
-            ongoing_instructions: 持续指令（第4轮及以后用户消息使用）
+            instructions: 本轮使用的指令内容
+            bot_reply: 机器人回复内容
+            history: 对话历史记录
+            model_name: 使用的AI模型名称
+            user_input: 用户输入内容
+            round: 对话轮次
             
         Returns:
             消息记录的ID，失败返回None
@@ -52,28 +53,35 @@ class SupabaseMessageRepository:
             if not user_id or not user_id.strip():
                 self.logger.error("❌ user_id 不能为空")
                 return None
+            # sender 参数仅用于兼容旧接口，入库时不再写入，也不做强校验
             
-            if not message or not message.strip():
-                self.logger.error("❌ message 不能为空")
-                return None
-            
-            if sender not in ['user', 'bot']:
-                self.logger.error(f"❌ sender 必须是 'user' 或 'bot'，当前值: {sender}")
-                return None
+            # 轻量数据验证（兼容当前先写bot后补user的流程）
+            if round is not None:
+                try:
+                    if int(round) <= 0:
+                        self.logger.error(f"❌ round 必须为正整数，当前值: {round}")
+                        return None
+                except Exception:
+                    self.logger.error(f"❌ round 必须为整数，当前值: {round}")
+                    return None
+            if user_input is None and bot_reply is None:
+                # 允许短暂不完整（例如先写bot_reply），但记录警告
+                self.logger.warning("⚠️ 本次写入未包含 user_input 或 bot_reply，可能为临时不完整行（将于后续补全）")
+            if user_input is not None and instructions is None:
+                # 用户输入通常伴随指令与历史，缺省并非致命，提醒优化
+                self.logger.debug("ℹ️ 用户输入未携带 instructions（允许，但建议补充以便复现）")
+            if bot_reply is not None and user_input is None and round is None:
+                # 允许 bot 先写，但建议尽快补充 round 以实现一轮一行管理
+                self.logger.debug("ℹ️ 检测到仅 bot_reply 写入且 round 缺失（允许短暂存在，建议后续补充 round 与 user_input）")
             
             # 构造消息数据
             message_data = {
                 "user_id": str(user_id).strip(),
                 "role_id": str(role_id).strip() if role_id else None, 
-                "session_id": str(session_id).strip() if session_id else None,
-                "message": str(message).strip(),
-                "sender": str(sender).strip(),
-                "system_instructions": system_instructions,
-                "ongoing_instructions": ongoing_instructions
+                "session_id": str(session_id).strip() if session_id else None
                 # timestamp 和 last_interaction 由数据库触发器自动设置为东八区时间
             }
-            # 🆕 新字段写入逻辑：按有值追加至入库载荷（与旧字段并存，后续可移除旧字段）
-            # 注意：这些字段主要随“用户行（sender='user'）”一并保存
+            # 🆕 新字段写入逻辑：按需添加新字段
             if instructions is not None:
                 message_data["instructions"] = instructions
             if bot_reply is not None:
@@ -157,7 +165,7 @@ class SupabaseMessageRepository:
                 query = client.table(self.table_name)\
                     .select("id", count="exact")\
                     .eq("user_id", user_id)\
-                    .eq("sender", "user")  # 只统计用户发送的消息
+                    .gt("round", 0)  # 使用 round 统计用户消息轮数
                 
                 if date_from:
                     query = query.gte("timestamp", date_from.isoformat())
@@ -198,7 +206,7 @@ class SupabaseMessageRepository:
                 return client.table(self.table_name)\
                     .select("id", count="exact")\
                     .eq("user_id", user_id)\
-                    .eq("sender", "user")\
+                    .gt("round", 0)\
                     .gte("timestamp", today_start_utc.isoformat())\
                     .execute()
             
@@ -241,10 +249,8 @@ class SupabaseMessageRepository:
             return False
     
     def save_user_message_with_real_instructions_async(self, user_id: str, role_id: Optional[str], 
-                                                      session_id: str, message: str,
-                                                      system_instructions: Optional[str] = None,
-                                                      ongoing_instructions: Optional[str] = None,
-                                                      # 🆕 新字段写入逻辑（过渡期与旧字段并存）
+                                                      session_id: str,
+                                                      # 🆕 新字段写入逻辑
                                                       instructions: Optional[str] = None,
                                                       bot_reply: Optional[str] = None,
                                                       history: Optional[str] = None,
@@ -252,17 +258,20 @@ class SupabaseMessageRepository:
                                                       user_input: Optional[str] = None,
                                                       round: Optional[int] = None) -> asyncio.Task:
         """
-        异步保存用户消息（使用AI生成时的真实指令内容）
+        异步保存用户消息（使用AI生成时的真实数据内容）
         
-        这是推荐的保存方式，确保保存的指令与AI调用时完全一致
+        这是推荐的保存方式，确保保存的数据与AI调用时完全一致
         
         Args:
             user_id: 用户ID
             role_id: 角色ID
             session_id: 会话ID
-            message: 消息内容
-            system_instructions: AI生成时实际使用的系统指令
-            ongoing_instructions: AI生成时实际使用的持续指令
+            instructions: AI生成时实际使用的指令内容
+            bot_reply: 机器人回复内容
+            history: 对话历史记录
+            model_name: 使用的AI模型名称
+            user_input: 用户输入内容
+            round: 对话轮次
             
         Returns:
             asyncio.Task: 可以await的任务对象
@@ -273,10 +282,7 @@ class SupabaseMessageRepository:
                     user_id=user_id,
                     role_id=role_id,
                     session_id=session_id,
-                    message=message,
                     sender="user",
-                    system_instructions=system_instructions,
-                    ongoing_instructions=ongoing_instructions,
                     # 🆕 新字段写入逻辑：透传到基础保存方法
                     instructions=instructions,
                     bot_reply=bot_reply,
@@ -287,8 +293,7 @@ class SupabaseMessageRepository:
                 )
                 
                 if result:
-                    instruction_type = "系统指令" if system_instructions else "持续指令" if ongoing_instructions else "无指令"
-                    self.logger.debug(f"🔄 异步保存用户消息成功（真实指令）: id={result}, 指令类型={instruction_type}")
+                    self.logger.debug(f"🔄 异步保存用户消息成功: id={result}")
                 else:
                     self.logger.warning(f"⚠️ 异步保存用户消息失败: session={session_id}")
             except Exception as e:
@@ -296,41 +301,42 @@ class SupabaseMessageRepository:
         
         return asyncio.create_task(_safe_save())
     
-    async def _get_last_message_by_sender(self, session_id: str, sender: str) -> Optional[Dict[str, Any]]:
-        """获取某会话中指定sender的最新一条消息"""
+    async def _get_last_round_row(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """获取会话中最新一轮（最大 round）的行"""
         try:
             client = self.supabase_manager.get_client()
-            def _sync_select_last():
+            def _sync_select_last_round():
                 return client.table(self.table_name)\
-                    .select("id")\
+                    .select("id, round")\
                     .eq("session_id", session_id)\
-                    .eq("sender", sender)\
-                    .order("timestamp", desc=True)\
+                    .gt("round", 0)\
+                    .order("round", desc=True)\
                     .limit(1)\
                     .execute()
-            result = await asyncio.to_thread(_sync_select_last)
+            result = await asyncio.to_thread(_sync_select_last_round)
             if result.data and len(result.data) > 0:
                 return result.data[0]
             return None
         except Exception as e:
-            self.logger.error(f"❌ 获取最新消息失败: session_id={session_id}, sender={sender}, err={e}")
+            self.logger.error(f"❌ 获取最新轮次失败: session_id={session_id}, err={e}")
             return None
     
     async def delete_last_bot_message(self, session_id: str) -> bool:
         """删除会话中最新一条机器人消息（用于重新生成时清理旧回复）"""
         try:
-            last_bot = await self._get_last_message_by_sender(session_id, "bot")
-            if not last_bot:
+            last_round_row = await self._get_last_round_row(session_id)
+            if not last_round_row:
                 return True
-            msg_id = last_bot.get("id")
+            msg_id = last_round_row.get("id")
             client = self.supabase_manager.get_client()
-            def _sync_delete():
+            # 清空该轮的回复相关字段，而不是删除整行
+            def _sync_update_clear():
                 return client.table(self.table_name)\
-                    .delete()\
+                    .update({"bot_reply": None, "history": None, "model_name": None})\
                     .eq("id", msg_id)\
                     .execute()
-            await asyncio.to_thread(_sync_delete)
-            self.logger.info(f"🗑️ 已删除最新机器人消息: session_id={session_id}, id={msg_id}")
+            await asyncio.to_thread(_sync_update_clear)
+            self.logger.info(f"🧹 已清空最新一轮的机器人回复字段: session_id={session_id}, id={msg_id}")
             return True
         except Exception as e:
             self.logger.error(f"❌ 删除最新机器人消息失败: session_id={session_id}, err={e}")
@@ -344,10 +350,10 @@ class SupabaseMessageRepository:
         更新会话中最新一条用户消息的回复相关字段（用于重新生成时覆盖旧 bot_reply/history/model）
         """
         try:
-            last_user = await self._get_last_message_by_sender(session_id, "user")
-            if not last_user:
+            last_round_row = await self._get_last_round_row(session_id)
+            if not last_round_row:
                 return False
-            msg_id = last_user.get("id")
+            msg_id = last_round_row.get("id")
             payload: Dict[str, Any] = {}
             if bot_reply is not None:
                 payload["bot_reply"] = bot_reply
@@ -371,7 +377,7 @@ class SupabaseMessageRepository:
             return False
     
     def save_bot_message_async(self, user_id: str, role_id: Optional[str], 
-                              session_id: str, message: str) -> asyncio.Task:
+                              session_id: str, bot_reply: str) -> asyncio.Task:
         """
         异步保存机器人消息（不阻塞主流程）
         
@@ -379,7 +385,7 @@ class SupabaseMessageRepository:
             user_id: 用户ID
             role_id: 角色ID
             session_id: 会话ID
-            message: 消息内容
+            bot_reply: 机器人回复内容
             
         Returns:
             asyncio.Task: 可以await的任务对象
@@ -387,8 +393,12 @@ class SupabaseMessageRepository:
         async def _safe_save():
             try:
                 result = await self.save_message(
-                    user_id, role_id, session_id, message, "bot"
-                    # bot消息不需要指令，使用默认的None值
+                    user_id=user_id, 
+                    role_id=role_id, 
+                    session_id=session_id, 
+                    sender="bot",
+                    bot_reply=bot_reply
+                    # bot消息主要保存回复内容，其他字段使用默认的None值
                 )
                 if result:
                     self.logger.debug(f"🔄 异步保存机器人消息成功: id={result}")

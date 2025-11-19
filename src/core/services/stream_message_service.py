@@ -257,15 +257,12 @@ class StreamMessageService:
                                     role_id = session_info.get("role_id")
                                     
                                     if user_id:
-                                        # 异步保存带指令的用户消息（不阻塞主流程）
+                                        # 异步保存用户消息（不阻塞主流程）
                                         message_service.message_repository.save_user_message_with_real_instructions_async(
                                             user_id=str(user_id),
                                             role_id=str(role_id) if role_id else None,
                                             session_id=session_id,
-                                            message=content,
-                                            system_instructions=system_instructions,
-                                            ongoing_instructions=ongoing_instructions,
-                                            # 🆕 新字段写入逻辑（与旧字段并存，后续可移除旧字段）
+                                            # 🆕 新字段写入逻辑
                                             instructions=instructions,
                                             bot_reply=self._safe_text_for_telegram(accumulated_text),
                                             history=history_json_str,
