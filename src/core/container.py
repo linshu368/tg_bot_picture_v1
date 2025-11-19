@@ -164,9 +164,19 @@ def setup_container(settings) -> Container:
     # 注册消息服务
     def message_service_factory(c):
         from src.domain.services.message_service import MessageService
+        # 优先从环境变量创建 Upstash REST 适配器（不强依赖）
+        try:
+            import os
+            from src.infrastructure.redis.upstash_session_store import UpstashSessionStore
+            upstash_url = os.getenv("UPSTASH_REDIS_REST_URL")
+            upstash_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+            redis_store = UpstashSessionStore(rest_url=upstash_url, token=upstash_token) if upstash_url and upstash_token else None
+        except Exception:
+            redis_store = None
         return MessageService(
             message_repository=c.get("message_repository"),
-            session_service=c.get("session_service")
+            session_service=c.get("session_service"),
+            redis_store=redis_store
         )
     
     container.register_factory("message_service", message_service_factory)
