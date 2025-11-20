@@ -31,6 +31,9 @@ class MessageService:
         if self.redis_store:
             try:
                 asyncio.create_task(self.redis_store.append_message(session_id, message_data))
+                # 兜底：确保会话书签与元信息已持久化，避免重启后丢失 session 指针/角色
+                if self.session_service:
+                    asyncio.create_task(self._ensure_session_persisted(session_id))
             except Exception as _e:
                 self.logger.debug(f"写穿 Redis 失败: {session_id}, err={_e}")
         
@@ -49,6 +52,47 @@ class MessageService:
             # 用户消息不在这里保存，等AI处理完成后通过save_user_message_with_real_instructions_async保存
         
         return message_id
+    
+    async def _ensure_session_persisted(self, session_id: str) -> None:
+        """
+        确保 Redis 中存在：
+        - sess:current:{user_id} -> session_id
+        - sess:data:{session_id} -> { user_id, role_id, ... }
+        目的：即便最初创建会话时未成功写指针，后续任一消息保存都会补齐。
+        """
+        try:
+            if not self.redis_store or not self.session_service:
+                return
+            session_info = await self._get_session_info(session_id)
+            if not session_info:
+                return
+            user_id = session_info.get("user_id")
+            role_id = session_info.get("role_id")
+            if not user_id:
+                return
+            # 读取书签，若不存在则写入
+            try:
+                current_sid = await self.redis_store.get_current_session_id(str(user_id))
+            except Exception:
+                current_sid = None
+            if not current_sid:
+                await self.redis_store.set_current_session_id(str(user_id), session_id)
+            # 冗余索引：同步写入 last 指针
+            try:
+                await self.redis_store.set_last_session_id(str(user_id), session_id)
+                self.logger.debug(f"_ensure_session_persisted: 已写入 last 指针 user_id={user_id}, session_id={session_id}")
+            except Exception:
+                pass
+            # 回写/覆盖元信息
+            data = {
+                "session_id": session_id,
+                "user_id": str(user_id),
+                "role_id": role_id
+            }
+            await self.redis_store.set_session_data(session_id, data)
+            self.logger.info(f"🧷 已确保会话指针与元信息存在: user_id={user_id}, session_id={session_id}, role_id={role_id}")
+        except Exception as e:
+            self.logger.debug(f"ensure_session_persisted 失败: session_id={session_id}, err={e}")
     
     async def _async_save_to_supabase(self, session_id: str, role: str, content: str, message_id: str):
         """异步保存消息到Supabase"""

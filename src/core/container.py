@@ -123,10 +123,30 @@ def setup_container(settings) -> Container:
     
     container.register_factory("message_repository", message_repository_factory)
     
+    # 共享 Redis 存储（Upstash REST）单例 - 提前注册，供下游服务获取
+    def redis_store_factory(c):
+        try:
+            import os
+            from src.infrastructure.redis.upstash_session_store import UpstashSessionStore
+            upstash_url = os.getenv("UPSTASH_REDIS_REST_URL")
+            upstash_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+            if upstash_url and upstash_token:
+                return UpstashSessionStore(rest_url=upstash_url, token=upstash_token)
+        except Exception:
+            pass
+        return None
+    container.register_factory("redis_store", redis_store_factory)
+    
     # 注册 Service 层
     def session_service_factory(c):
         from src.domain.services.session_service_base import SessionService
-        return SessionService()
+        # 共享 Redis 存储（如可用）
+        redis_store = None
+        try:
+            redis_store = c.get("redis_store")
+        except Exception:
+            redis_store = None
+        return SessionService(redis_store=redis_store)
     
     container.register_factory("session_service", session_service_factory)
     
@@ -166,11 +186,7 @@ def setup_container(settings) -> Container:
         from src.domain.services.message_service import MessageService
         # 优先从环境变量创建 Upstash REST 适配器（不强依赖）
         try:
-            import os
-            from src.infrastructure.redis.upstash_session_store import UpstashSessionStore
-            upstash_url = os.getenv("UPSTASH_REDIS_REST_URL")
-            upstash_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
-            redis_store = UpstashSessionStore(rest_url=upstash_url, token=upstash_token) if upstash_url and upstash_token else None
+            redis_store = c.get("redis_store")
         except Exception:
             redis_store = None
         return MessageService(
@@ -178,6 +194,7 @@ def setup_container(settings) -> Container:
             session_service=c.get("session_service"),
             redis_store=redis_store
         )
+    
     
     container.register_factory("message_service", message_service_factory)
     

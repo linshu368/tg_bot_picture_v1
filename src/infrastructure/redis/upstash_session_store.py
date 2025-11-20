@@ -3,6 +3,7 @@ import time
 from typing import Any, List, Optional, Dict
 import httpx
 from urllib.parse import quote
+import logging
 
 
 class UpstashSessionStore:
@@ -22,9 +23,19 @@ class UpstashSessionStore:
         }
         self._ns = namespace
         self._client = httpx.AsyncClient(timeout=timeout)
+        logging.getLogger(__name__).info(f"UpstashSessionStore 初始化: base_url={self._base_url}, namespace={self._ns}")
 
     def _key_messages(self, session_id: str) -> str:
         return f"{self._ns}:{session_id}:messages"
+    
+    def _key_current_session(self, user_id: str) -> str:
+        return f"{self._ns}:current:{user_id}"
+    
+    def _key_session_data(self, session_id: str) -> str:
+        return f"{self._ns}:data:{session_id}"
+    
+    def _key_last_session(self, user_id: str) -> str:
+        return f"{self._ns}:last:{user_id}"
 
     async def _cmd(self, *args: str) -> Any:
         """
@@ -80,6 +91,30 @@ class UpstashSessionStore:
         if isinstance(data, dict) and data.get("error"):
             raise RuntimeError(str(data.get("error")))
         return data
+
+    def _decode_get_result(self, result: Any) -> Any:
+        """
+        统一解码 Upstash GET 返回，提取 result/value，并在为字符串时尽力解析 JSON。
+        """
+        raw = None
+        if isinstance(result, dict):
+            raw = result.get("result")
+            if raw is None:
+                raw = result.get("value")
+            # 兼容多层嵌套结构：反复展开 result/value，直到拿到最终原子值或包含 session_id 的对象
+            while isinstance(raw, dict) and ("session_id" not in raw) and (("result" in raw) or ("value" in raw)):
+                raw = raw.get("result") if "result" in raw else raw.get("value")
+        if raw in (None, "null", ""):
+            return None
+        if isinstance(raw, (list, dict)):
+            return raw
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                return parsed
+            except json.JSONDecodeError:
+                return raw
+        return raw
 
     async def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
         """
@@ -188,4 +223,76 @@ class UpstashSessionStore:
             print(f"ℹ️ INFO: 会话 {session_id} 追加消息成功，当前共 {int(length)} 条")
         except Exception:
             print(f"ℹ️ INFO: 会话 {session_id} 追加消息成功")
+
+    # ----------------------------
+    # Session pointer & metadata
+    # ----------------------------
+    async def get_current_session_id(self, user_id: str) -> Optional[str]:
+        key = self._key_current_session(user_id)
+        try:
+            result = await self._cmd("GET", key)
+        except Exception:
+            logging.getLogger(__name__).info(f"get_current_session_id GET 失败: key={key}")
+            return None
+        value = self._decode_get_result(result)
+        logging.getLogger(__name__).info(f"get_current_session_id 读取: key={key}, value={value}")
+        if isinstance(value, dict):
+            # 若误存为对象，优先 'session_id'，其次 'value'
+            sid = value.get("session_id") or value.get("value")
+            return sid or None
+        if isinstance(value, str):
+            return value or None
+        return None
+
+    async def set_current_session_id(self, user_id: str, session_id: str) -> None:
+        key = self._key_current_session(user_id)
+        await self._cmd("SET", key, session_id)
+        logging.getLogger(__name__).info(f"set_current_session_id 写入: key={key}, session_id={session_id}")
+    
+    async def get_last_session_id(self, user_id: str) -> Optional[str]:
+        key = self._key_last_session(user_id)
+        try:
+            result = await self._cmd("GET", key)
+        except Exception:
+            logging.getLogger(__name__).info(f"get_last_session_id GET 失败: key={key}")
+            return None
+        value = self._decode_get_result(result)
+        logging.getLogger(__name__).info(f"get_last_session_id 读取: key={key}, value={value}")
+        if isinstance(value, dict):
+            sid = value.get("session_id") or value.get("value")
+            return sid or None
+        if isinstance(value, str):
+            return value or None
+        return None
+    
+    async def set_last_session_id(self, user_id: str, session_id: str) -> None:
+        key = self._key_last_session(user_id)
+        await self._cmd("SET", key, session_id)
+        logging.getLogger(__name__).info(f"set_last_session_id 写入: key={key}, session_id={session_id}")
+
+    async def get_session_data(self, session_id: str) -> Optional[Dict[str, Any]]:
+        key = self._key_session_data(session_id)
+        try:
+            result = await self._cmd("GET", key)
+        except Exception:
+            return None
+        value = self._decode_get_result(result)
+        try:
+            logging.getLogger(__name__).info(f"get_session_data 读取: key={key}, value={value}")
+        except Exception:
+            pass
+        return value if isinstance(value, dict) else None
+
+    async def set_session_data(self, session_id: str, data: Dict[str, Any]) -> None:
+        key = self._key_session_data(session_id)
+        await self._cmd("SET", key, data)
+        try:
+            rid = None
+            try:
+                rid = data.get("role_id") if isinstance(data, dict) else None
+            except Exception:
+                rid = None
+            logging.getLogger(__name__).info(f"set_session_data 写入: key={key}, role_id={rid}, keys={list(data.keys()) if isinstance(data, dict) else 'n/a'}")
+        except Exception:
+            pass
 
