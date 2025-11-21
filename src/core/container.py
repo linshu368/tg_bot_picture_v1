@@ -198,7 +198,12 @@ def setup_container(settings) -> Container:
     
     container.register_factory("message_service", message_service_factory)
     
-    # 注册AI调用器（Grok 与 Novel）
+    # 注册AI调用器（Gemini、Grok 与 Novel）
+    def gemini_caller_factory(c):
+        from demo.gemini_async import AsyncGeminiCaller
+        return AsyncGeminiCaller()
+    container.register_factory("gemini_caller", gemini_caller_factory)
+
     def grok_caller_factory(c):
         from demo.grok_async import AsyncGrokCaller
         return AsyncGrokCaller()
@@ -213,6 +218,7 @@ def setup_container(settings) -> Container:
     def ai_completion_port_factory(c):
         from src.domain.services.ai_completion_port import AICompletionPort
         return AICompletionPort(
+            gemini_caller=c.get("gemini_caller"),
             grok_caller=c.get("grok_caller"),
             novel_caller=c.get("novel_caller")
         )

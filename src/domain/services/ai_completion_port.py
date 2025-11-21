@@ -3,14 +3,17 @@ import time
 import random
 import os
 import copy
+import asyncio
 from typing import Optional, Callable, AsyncGenerator, Dict, Any
 from demo.grok_async import AsyncGrokCaller
 from demo.novel_async import AsyncNovelCaller
+from demo.gemini_async import AsyncGeminiCaller
 
 class AICompletionPort:
-    def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None):
+    def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None, gemini_caller: Optional[AsyncGeminiCaller] = None):
         self.grok = grok_caller
         self.novel = novel_caller
+        self.gemini = gemini_caller
         # 前3轮对话的增强指令模板
         self.early_conversation_instruction = (
             "##用户信息:{user_context}\n"
@@ -241,39 +244,35 @@ class AICompletionPort:
         Yields:
             str: 每个流式回复片段
         """
-        for attempt in range(max_retries):
+        full_sequence = [
+            ("Gemini", self.gemini, "GEMINI_MODEL"),
+            ("Grok", self.grok, "GROK_MODEL"),
+            ("Novel", self.novel, "NOVEL_MODEL"),
+        ]
+        provider_sequence = [(name, caller, env_key) for name, caller, env_key in full_sequence if caller]
+
+        if not provider_sequence:
+            raise RuntimeError("未配置任何可用的AI调用器")
+
+        total_attempts = min(max_retries, len(provider_sequence))
+
+        for attempt in range(total_attempts):
+            provider, caller, model_env_key = provider_sequence[attempt]
+            model_env = os.getenv(model_env_key)
+
             try:
-                print(f"🔄 AI生成尝试 #{attempt + 1}/{max_retries}")
-
-                # 前两次使用 Grok，第三次使用 Novel
-                if attempt < 2:
-                    if not self.grok:
-                        raise RuntimeError("Grok 调用器未配置")
-                    provider = "Grok"
-                    caller = self.grok
-                    model_env = os.getenv("GROK_MODEL")
-                else:
-                    if not self.novel:
-                        raise RuntimeError("Novel 调用器未配置")
-                    provider = "Novel"
-                    caller = self.novel
-                    model_env = os.getenv("NOVEL_MODEL")
-
+                print(f"🔄 AI生成尝试 #{attempt + 1}/{total_attempts}")
                 print(f"🚀 本次尝试使用提供方: {provider} | 模型: {model_env}")
 
-                # 仅在成功开始产出内容后再对上层触发回调，避免失败尝试污染
                 used_meta_candidate: Dict[str, Any] = {}
+
                 def _capture_used_instructions(meta: Dict[str, Any]) -> None:
-                    # 记录候选元数据，稍后在首次产出时统一上报
                     used_meta_candidate.clear()
                     used_meta_candidate.update(meta or {})
-                    # 增补 provider/model
                     used_meta_candidate["provider"] = provider
                     used_meta_candidate["model"] = model_env
 
-                # 使用统一的超时策略（两边 caller 都使用 total=timeout）
-                first_chunk_sent = False
-                async for chunk in self.generate_reply_stream(
+                stream = self.generate_reply_stream(
                     role_data=role_data,
                     history=history,
                     user_input=user_input,
@@ -283,31 +282,52 @@ class AICompletionPort:
                     model_name=model_env,
                     on_used_instructions=_capture_used_instructions,
                     apply_enhancement=apply_enhancement
-                ):
+                )
+
+                first_chunk_sent = False
+
+                def _mark_first_chunk() -> None:
+                    nonlocal first_chunk_sent
                     if not first_chunk_sent:
-                        # 首次产出内容时再把本次尝试的元数据上报给调用方
                         if on_used_instructions and used_meta_candidate:
                             try:
                                 on_used_instructions(dict(used_meta_candidate))
                             except Exception as _e:
                                 print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
                         first_chunk_sent = True
-                    yield chunk
 
-                # 成功生成，退出重试循环
+                if provider == "Gemini":
+                    try:
+                        first_chunk = await asyncio.wait_for(stream.__anext__(), timeout=3)
+                    except asyncio.TimeoutError:
+                        await stream.aclose()
+                        raise TimeoutError("Gemini 首个chunk超时（超过3秒）")
+                    except StopAsyncIteration:
+                        await stream.aclose()
+                        raise RuntimeError("Gemini 未返回任何内容")
+
+                    _mark_first_chunk()
+                    yield first_chunk
+
+                    async for chunk in stream:
+                        _mark_first_chunk()
+                        yield chunk
+                else:
+                    async for chunk in stream:
+                        _mark_first_chunk()
+                        yield chunk
+
                 print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
                 return
 
             except Exception as e:
                 print(f"❌ AI生成失败（第{attempt + 1}次尝试）: {e}")
 
-                if attempt == max_retries - 1:
-                    # 最后一次重试失败，返回固定话术
+                if attempt == total_attempts - 1:
                     print(f"💔 所有重试均失败，返回兜底话术")
                     yield "抱歉，回复出现了问题，后台正在加紧修复，请耐心等待"
                     return
                 else:
-                    # 继续重试
                     print(f"🔄 准备进行第{attempt + 2}次重试...")
                     continue
 
@@ -322,8 +342,10 @@ class AICompletionPort:
     def _select_default_caller(self) -> Optional[object]:
         """
         选择一个默认可用的调用器：
-        优先 Novel，其次 Grok；如果都不存在则返回 None
+        优先 Gemini，其次 Novel、Grok；如果都不存在则返回 None
         """
+        if self.gemini:
+            return self.gemini
         if self.novel:
             return self.novel
         if self.grok:
