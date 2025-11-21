@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 
 
-env_path = Path(__file__).resolve().parents[2] / ".env"
+env_path = Path(__file__).resolve().parents[3] / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 

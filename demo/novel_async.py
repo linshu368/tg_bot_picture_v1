@@ -63,7 +63,7 @@ class AsyncNovelCaller:
             "messages": messages,
             "stream": True,
             # 与你的 test1.py 参数保持一致
-            "temperature": 0.7,
+            "temperature": 0.3,
             "max_tokens": 800,
             "top_p": 0.35,
             "repetition_penalty": 1.05,
