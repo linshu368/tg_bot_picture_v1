@@ -79,7 +79,7 @@ class SupabaseMessageRepository:
                 "user_id": str(user_id).strip(),
                 "role_id": str(role_id).strip() if role_id else None, 
                 "session_id": str(session_id).strip() if session_id else None
-                # timestamp 和 last_interaction 由数据库触发器自动设置为东八区时间
+                # timestamp 由数据库触发器自动设置为东八区时间
             }
             # 🆕 新字段写入逻辑：按需添加新字段
             if instructions is not None:

@@ -166,7 +166,7 @@ class StreamMessageService:
                 user_input=content,
                 session_context_source=context_source,
                 on_used_instructions=_on_used_instructions,
-                apply_enhancement=False
+                apply_enhancement=True
             ):
                 # 对大块进行字符级分割处理
                 await self._process_chunk_with_granular_control(
@@ -199,7 +199,7 @@ class StreamMessageService:
                     self.logger.error(f"最终更新消息失败: {e}")
                 
                 # 保存完整回复到数据库
-                message_service.save_message(session_id, "assistant", self._safe_text_for_telegram(accumulated_text))
+                await message_service.save_message(session_id, "assistant", self._safe_text_for_telegram(accumulated_text))
                 
                 # 🆕 AI生成完成后，使用回调传回的实际使用指令，重新保存用户消息（带指令）
                 if message_service.message_repository and hasattr(message_service, 'session_service'):
@@ -243,7 +243,7 @@ class StreamMessageService:
                         
                         # 🆕 新字段写入逻辑：round（以 session 维度的用户消息序号计算）
                         try:
-                            current_history = message_service.get_history(session_id) or []
+                            current_history = await message_service.get_history(session_id) or []
                             round_num = sum(1 for m in current_history if isinstance(m, dict) and m.get("role") == "user")
                         except Exception:
                             round_num = None
@@ -362,21 +362,12 @@ class StreamMessageService:
             session = await session_service.get_or_create_session(user_id)
             session_id = session["session_id"]
             
-            # 保存用户消息（先增强后保存）
-            try:
-                from src.utils.enhance import enhance_user_input
-                prev_history = message_service.get_history(session_id) or []
-                prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
-                current_turn_index = prev_user_turns + 1
-                instruction_type = "system" if current_turn_index <= 3 else "ongoing"
-                enhanced_content, _ = enhance_user_input(content, instruction_type, user_context=content)
-            except Exception:
-                enhanced_content = content
-            user_message_id = message_service.save_message(session_id, "user", enhanced_content)
+            # 保存用户原始消息
+            user_message_id = await message_service.save_message(session_id, "user", content)
             
             # 保存Bot的限制提示回复
             limit_message = "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！"
-            bot_message_id = message_service.save_message(session_id, "assistant", limit_message)
+            bot_message_id = await message_service.save_message(session_id, "assistant", limit_message)
             
             self.logger.info(f"💾 已保存限制提示消息: user_message_id={user_message_id}, bot_message_id={bot_message_id}")
             
@@ -416,19 +407,9 @@ class StreamMessageService:
 
    
 
-        # 保存用户消息并获取历史
-        # 先读取当前历史以判断本轮使用的指令类型
-        from src.utils.enhance import enhance_user_input
-        prev_history = message_service.get_history(session_id) or []
-        try:
-            prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
-        except Exception:
-            prev_user_turns = 0
-        current_turn_index = prev_user_turns + 1
-        instruction_type = "system" if current_turn_index <= 3 else "ongoing"
-        enhanced_content, _used_instruction = enhance_user_input(content, instruction_type, user_context=content)
-        user_message_id = message_service.save_message(session_id, "user", enhanced_content)
-        history = message_service.get_history(session_id)
+        # 保存用户原始消息并获取历史
+        user_message_id = await message_service.save_message(session_id, "user", content)
+        history = await message_service.get_history(session_id)
         # 清洗历史消息内容，确保与展示一致
         cleaned_history = []
         for msg in history or []:

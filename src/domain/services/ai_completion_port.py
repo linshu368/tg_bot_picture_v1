@@ -2,6 +2,7 @@
 import time
 import random
 import os
+import copy
 from typing import Optional, Callable, AsyncGenerator, Dict, Any
 from demo.grok_async import AsyncGrokCaller
 from demo.novel_async import AsyncNovelCaller
@@ -103,6 +104,7 @@ class AICompletionPort:
         
         # 构建 prompt（复用相同逻辑）
         messages = []
+        history_for_prompt = copy.deepcopy(history or [])
         
         # 1. 添加 system_prompt
         if "system_prompt" in role_data:
@@ -115,8 +117,8 @@ class AICompletionPort:
         elif session_context_source == "snapshot":
             print(f"⏭️ 跳过角色预置对话（快照会话已包含完整上下文）")
         
-        # 3. 添加实际会话历史
-        messages.extend(history)
+        # 3. 添加实际会话历史（使用副本，避免污染原始记录）
+        messages.extend(history_for_prompt)
         
         # 🆕 4. 对话增强指令逻辑（流式版本）
         user_turn_count = self._count_real_user_turns(history)
@@ -191,7 +193,7 @@ class AICompletionPort:
             used_meta["final_messages"] = list(messages)
             used_meta["prompt_payload"] = {
                 "system_prompt": role_data.get("system_prompt") if isinstance(role_data, dict) else None,
-                "history": history,
+                "history": history_for_prompt,
                 "user_input": user_input,
                 "instructions": used_meta.get("instructions"),
                 "instruction_type": used_meta.get("instruction_type"),

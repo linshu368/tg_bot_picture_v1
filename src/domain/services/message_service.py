@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List
 class MessageService:
     def __init__(self, message_repository=None, session_service=None, redis_store=None):
         self._store = {}  # { session_id: [ {role, content, message_id} ] }
+        self._history_loaded = {}  # { session_id: bool }
         self.message_repository = message_repository
         self.session_service = session_service
         self.redis_store = redis_store
@@ -14,7 +15,7 @@ class MessageService:
         # 用于存储会话相关信息的缓存
         self._session_cache = {}  # { session_id: { user_id, role_id } }
 
-    def save_message(self, session_id, role, content):
+    async def save_message(self, session_id, role, content):
         if len(content) > 10000:
             raise ValueError("4002: 消息过长，最大长度 10000")
         message_id = uuid.uuid4().hex[:8]  
@@ -25,15 +26,18 @@ class MessageService:
             "content": content
         }
         
-        self._store.setdefault(session_id, []).append(message_data)
+        history = await self.get_history(session_id, log=False)
+        history.append(message_data)
+        self._store[session_id] = history
+        self._history_loaded[session_id] = True
         
         # 写穿到 Redis（Upstash REST / RedisJSON）
         if self.redis_store:
             try:
-                asyncio.create_task(self.redis_store.append_message(session_id, message_data))
+                await self.redis_store.append_message(session_id, message_data)
                 # 兜底：确保会话书签与元信息已持久化，避免重启后丢失 session 指针/角色
                 if self.session_service:
-                    asyncio.create_task(self._ensure_session_persisted(session_id))
+                    await self._ensure_session_persisted(session_id)
             except Exception as _e:
                 self.logger.debug(f"写穿 Redis 失败: {session_id}, err={_e}")
         
@@ -224,70 +228,48 @@ class MessageService:
         
         return None
 
-    def get_history(self, session_id):
-        history = self._store.get(session_id, [])
-        
-        # 若内存为空，尝试从 Redis 回填（同步场景下使用；异步场景建议使用 ensure_history_loaded）
-        if not history and self.redis_store:
-            try:
-                loop = asyncio.get_running_loop()
-                # 已在事件循环内：后台加载，不阻塞当前调用
-                asyncio.create_task(self._load_history_from_redis(session_id))
-            except RuntimeError:
-                # 无事件循环：可直接阻塞获取
-                try:
-                    history_from_redis = asyncio.run(self.redis_store.get_messages(session_id))
-                    if history_from_redis:
-                        self._store[session_id] = history_from_redis
-                        history = history_from_redis
-                except Exception as _e:
-                    self.logger.debug(f"同步加载 Redis 历史失败: {session_id}, err={_e}")
-        
-        # 打印历史记录信息
-        print(f"📚 获取历史记录 | Session: {session_id} | 消息数量: {len(history)}")
-        if history:
-            print("📖 历史消息内容:")
-            for i, msg in enumerate(history):
-                role_emoji = "👤" if msg["role"] == "user" else "🤖"
-                print(f"  [{i+1}] {role_emoji} {msg['role']} (ID: {msg['message_id']})")
-                # 限制内容长度避免输出过长
-                content_preview = msg['content'][:100] + "..." if len(msg['content']) > 100 else msg['content']
-                print(f"      📝 {content_preview}")
-            print("📚" + "="*48)
+    async def get_history(self, session_id: str, force: bool = False, log: bool = True) -> List[Dict[str, Any]]:
+        """
+        获取会话历史；当启用 Redis 时，优先从 Redis 读取并回填到内存
+        """
+        if not session_id:
+            return []
+        if not force and self._history_loaded.get(session_id):
+            history = self._store.get(session_id, [])
         else:
-            print("📚 历史记录为空")
-            print("📚" + "="*48)
-        
-        return history
+            history = []
+            if self.redis_store:
+                try:
+                    history = await self.redis_store.get_messages(session_id)
+                except Exception as _e:
+                    self.logger.debug(f"从 Redis 获取历史失败: {session_id}, err={_e}")
+                    history = self._store.get(session_id, [])
+            else:
+                history = self._store.get(session_id, [])
+            self._store[session_id] = history or []
+            self._history_loaded[session_id] = True
+        if log:
+            print(f"📚 获取历史记录 | Session: {session_id} | 消息数量: {len(history)}")
+            if history:
+                print("📖 历史消息内容:")
+                for i, msg in enumerate(history):
+                    role_emoji = "👤" if msg["role"] == "user" else "🤖"
+                    print(f"  [{i+1}] {role_emoji} {msg['role']} (ID: {msg['message_id']})")
+                    content_preview = msg['content'][:100] + "..." if len(msg['content']) > 100 else msg['content']
+                    print(f"      📝 {content_preview}")
+                print("📚" + "="*48)
+            else:
+                print("📚 历史记录为空")
+                print("📚" + "="*48)
+        return history or []
     
     async def ensure_history_loaded(self, session_id: str, force: bool = False) -> int:
         """
         异步确保内存中存在会话历史；若为空或 force=True 则从 Redis 读取回填
         Returns: 加载后的消息数
         """
-        if not self.redis_store:
-            return len(self._store.get(session_id, []))
-        if self._store.get(session_id) and not force:
-            return len(self._store.get(session_id, []))
-        try:
-            await self._load_history_from_redis(session_id)
-        except Exception as _e:
-            self.logger.debug(f"ensure_history_loaded 失败: {session_id}, err={_e}")
-        return len(self._store.get(session_id, []))
-    
-    async def _load_history_from_redis(self, session_id: str) -> None:
-        """
-        从 Redis 读取整个会话历史并回填到内存缓存
-        """
-        if not self.redis_store:
-            return
-        try:
-            messages = await self.redis_store.get_messages(session_id)
-            if messages:
-                self._store[session_id] = messages
-                self.logger.info(f"🧩 Redis 历史已回填: session_id={session_id}, count={len(messages)}")
-        except Exception as _e:
-            self.logger.debug(f"加载 Redis 历史失败: {session_id}, err={_e}")
+        history = await self.get_history(session_id, force=force)
+        return len(history)
        
 
     async def regenerate_reply(self, session_id: str, last_message_id: str, ai_port, role_data, session_context_source=None):
@@ -301,8 +283,7 @@ class MessageService:
             session_context_source: 会话上下文来源，"snapshot" 表示快照会话
         """
         # 确保在异步上下文中优先从 Redis 回填历史
-        await self.ensure_history_loaded(session_id)
-        history = self.get_history(session_id)
+        history = await self.get_history(session_id)
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"[DEBUG] regenerate_reply: session_id={session_id}, last_message_id={last_message_id}")
@@ -332,10 +313,11 @@ class MessageService:
         # 2. 删除该用户消息之后的 Bot 回复
         history = history[:target_index + 1]
         self._store[session_id] = history
+        self._history_loaded[session_id] = True
         # 覆盖写回 Redis
         if self.redis_store:
             try:
-                asyncio.create_task(self.redis_store.set_messages(session_id, history))
+                await self.redis_store.set_messages(session_id, history)
             except Exception as _e:
                 logger.debug(f"回写 Redis 失败(regenerate trim): {session_id}, err={_e}")
         logger.info(f"[DEBUG] regenerate_reply: trimmed history={history}")
@@ -367,7 +349,7 @@ class MessageService:
                 await self.message_repository.delete_last_bot_message(session_id)
         except Exception as e:
             logger.debug(f"删除旧机器人消息失败(regenerate): {e}")
-        bot_message_id = self.save_message(session_id, "assistant", reply)
+        bot_message_id = await self.save_message(session_id, "assistant", reply)
         logger.info(f"[DEBUG] regenerate_reply: saved new bot_message_id={bot_message_id}")
         
         # 4.1 覆盖最新用户消息中的 bot_reply/history/model（不新增用户行）
@@ -405,7 +387,7 @@ class MessageService:
 
         return {"message_id": bot_message_id, "reply": reply}
 
-    def truncate_history_after_message(self, session_id: str, user_message_id: str) -> Optional[str]:
+    async def truncate_history_after_message(self, session_id: str, user_message_id: str) -> Optional[str]:
         """
         截断指定用户消息之后的所有回复，并返回用户消息内容
         
@@ -416,7 +398,7 @@ class MessageService:
         Returns:
             用户消息内容，如果找不到则返回None
         """
-        history = self.get_history(session_id)
+        history = await self.get_history(session_id)
         logger = logging.getLogger(__name__)
         logger.info(f"[DEBUG] truncate_history_after_message: session_id={session_id}, user_message_id={user_message_id}")
 
@@ -444,10 +426,11 @@ class MessageService:
         # 2. 删除该用户消息之后的所有回复
         truncated_history = history[:target_index + 1]
         self._store[session_id] = truncated_history
+        self._history_loaded[session_id] = True
         # 覆盖写回 Redis
         if self.redis_store:
             try:
-                asyncio.create_task(self.redis_store.set_messages(session_id, truncated_history))
+                await self.redis_store.set_messages(session_id, truncated_history)
             except Exception as _e:
                 logger.debug(f"回写 Redis 失败(truncate): {session_id}, err={_e}")
         logger.info(f"[DEBUG] truncate_history_after_message: truncated history length={len(truncated_history)}")
@@ -459,7 +442,7 @@ class MessageService:
 
         return user_input
 
-    def restore_history_to_memory(self, session_id: str, messages: List[Dict[str, str]]) -> int:
+    async def restore_history_to_memory(self, session_id: str, messages: List[Dict[str, str]]) -> int:
         """
         仅在内存中恢复历史消息（用于快照会话），不保存到数据库
         
@@ -490,10 +473,11 @@ class MessageService:
         
         # 直接写入内存存储，不触发数据库保存
         self._store[session_id] = restored_messages
+        self._history_loaded[session_id] = True
         # 覆盖写回 Redis
         if self.redis_store:
             try:
-                asyncio.create_task(self.redis_store.set_messages(session_id, restored_messages))
+                await self.redis_store.set_messages(session_id, restored_messages)
             except Exception as _e:
                 self.logger.debug(f"回写 Redis 失败(restore): {session_id}, err={_e}")
         

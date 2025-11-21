@@ -187,21 +187,12 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
         session = await session_service.get_or_create_session(user_id)
         session_id = session["session_id"]
         
-        # 保存用户消息（先增强后保存）
-        try:
-            from src.utils.enhance import enhance_user_input
-            prev_history = message_service.get_history(session_id) or []
-            prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
-            current_turn_index = prev_user_turns + 1
-            instruction_type = "system" if current_turn_index <= 3 else "ongoing"
-            enhanced_content, _ = enhance_user_input(content, instruction_type, user_context=content)
-        except Exception:
-            enhanced_content = content
-        user_message_id = message_service.save_message(session_id, "user", enhanced_content)
+        # 保存用户原始消息
+        user_message_id = await message_service.save_message(session_id, "user", content)
         
         # 保存Bot的限制提示回复
         limit_message = "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！"
-        bot_message_id = message_service.save_message(session_id, "assistant", limit_message)
+        bot_message_id = await message_service.save_message(session_id, "assistant", limit_message)
         
         logger.info(f"💾 已保存限制提示消息: user_message_id={user_message_id}, bot_message_id={bot_message_id}")
         
@@ -245,18 +236,9 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
         logger.error(f"❌ 角色配置错误: 默认角色也不存在")
         return envelope_error(4001, "角色配置错误")
 
-    # 4. 保存用户消息并生成回复（先增强后保存）
-    try:
-        from src.utils.enhance import enhance_user_input
-        prev_history = message_service.get_history(session_id) or []
-        prev_user_turns = sum(1 for m in prev_history if isinstance(m, dict) and m.get("role") == "user")
-        current_turn_index = prev_user_turns + 1
-        instruction_type = "system" if current_turn_index <= 3 else "ongoing"
-        enhanced_content, _ = enhance_user_input(content, instruction_type, user_context=content)
-    except Exception:
-        enhanced_content = content
-    user_message_id = message_service.save_message(session_id, "user", enhanced_content)
-    history = message_service.get_history(session_id)
+    # 4. 保存用户原始消息并生成回复
+    user_message_id = await message_service.save_message(session_id, "user", content)
+    history = await message_service.get_history(session_id)
     
     # 获取会话上下文来源（判断是否为快照会话）
     context_source = session.get("context_source") if session else None
@@ -278,7 +260,7 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
             user_input=content,
             session_context_source=context_source,
             on_used_instructions=_on_used_instructions,
-            apply_enhancement=False
+            apply_enhancement=True
         ):
             reply += chunk
             
@@ -339,7 +321,7 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
         logger.error(f"❌ AI生成失败: {e}")
         return envelope_error(5000, f"AI生成失败: {str(e)}")
 
-    bot_message_id = message_service.save_message(session_id, "assistant", reply)
+    bot_message_id = await message_service.save_message(session_id, "assistant", reply)
 
     return envelope_ok({
         "session_id": session_id,

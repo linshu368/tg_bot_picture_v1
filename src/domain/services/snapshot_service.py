@@ -39,7 +39,7 @@ class SnapshotService:
 
     async def save_snapshot(self, user_id: str, session_id: str, user_title: Optional[str] = None) -> str:
         # 1. 读取会话历史（实际交互内容）
-        history = self.message_service.get_history(session_id) or []
+        history = await self.message_service.get_history(session_id) or []
         session_messages: List[Dict[str, str]] = [
             {"role": m.get("role", ""), "content": m.get("content", "")}
             for m in history

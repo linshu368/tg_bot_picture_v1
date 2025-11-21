@@ -94,7 +94,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 
                 # 保存Bot的限制提示回复到数据库
                 limit_message = "您今日的免费体验次数已用完，明日0点重置。感谢您的使用！"
-                bot_message_id = self.message_service.save_message(session_id, "assistant", limit_message)
+                bot_message_id = await self.message_service.save_message(session_id, "assistant", limit_message)
                 self.logger.info(f"💾 已保存重新生成限制提示消息: bot_message_id={bot_message_id}")
                 
                 await query.answer(limit_message, show_alert=True)
@@ -130,7 +130,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             await query.edit_message_reply_markup(reply_markup=None)
             
             # 6. 截断历史记录并获取用户消息内容
-            user_input = self.message_service.truncate_history_after_message(session_id, user_message_id)
+            user_input = await self.message_service.truncate_history_after_message(session_id, user_message_id)
             if not user_input:
                 await query.message.reply_text("❌ 无法找到指定的用户消息")
                 return
@@ -164,7 +164,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         from src.domain.services.ai_completion_port import ai_completion_port
         
         # 获取历史记录（已截断）- 使用实例的message_service
-        history = self.message_service.get_history(session_id)
+        history = await self.message_service.get_history(session_id)
         
         # 流式控制参数（与StreamMessageService保持一致）
         accumulated_text = ""
@@ -200,7 +200,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 user_input=user_input,
                 session_context_source=context_source,
                 on_used_instructions=_on_used_instructions,
-                apply_enhancement=False
+                apply_enhancement=True
             ):
                 # 对大块进行字符级分割处理（复用StreamMessageService的逻辑）
                 await self._process_chunk_with_granular_control(
@@ -238,7 +238,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                     self.logger.debug(f"删除旧机器人消息失败(重新生成): {e}")
                 
                 # 保存新的完整回复到数据库
-                self.message_service.save_message(session_id, "assistant", accumulated_text)
+                await self.message_service.save_message(session_id, "assistant", accumulated_text)
                 
                 # 🆕 AI重新生成完成后，获取实际使用的指令并保存用户消息（带指令）
                 if self.message_service.message_repository and hasattr(self.message_service, 'session_service'):
@@ -502,7 +502,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             # 3) 预置历史消息（快照中的 messages 已包含预置与实际）
             # 🔄 只在内存中恢复历史，不保存到数据库（避免重复记录）
             messages = snap.get("messages", [])
-            restored_count = self.message_service.restore_history_to_memory(new_session_id, messages)
+            restored_count = await self.message_service.restore_history_to_memory(new_session_id, messages)
 
             # 4) 写入会话上下文覆写（MVP：直接附加到会话字典）
             session_obj = await self.session_service.get_session(new_session_id)
