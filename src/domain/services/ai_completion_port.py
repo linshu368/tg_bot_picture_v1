@@ -29,6 +29,13 @@ class AICompletionPort:
         # 取消实例级共享状态，改为通过回调向调用方传递本次使用的指令信息
         # self.last_used_instructions 已移除
 
+        timeout_str = os.getenv("GEMINI_FIRST_CHUNK_TIMEOUT")
+        try:
+            self.gemini_first_chunk_timeout = float(timeout_str) if timeout_str else 3.0
+        except (TypeError, ValueError):
+            print("⚠️ GEMINI_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
+            self.gemini_first_chunk_timeout = 3.0
+
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
         """Return a logging-safe preview of text, avoiding Unicode surrogate errors.
@@ -297,11 +304,12 @@ class AICompletionPort:
                         first_chunk_sent = True
 
                 if provider == "Gemini":
+                    first_chunk_timeout = self.gemini_first_chunk_timeout or 3.0
                     try:
-                        first_chunk = await asyncio.wait_for(stream.__anext__(), timeout=3)
+                        first_chunk = await asyncio.wait_for(stream.__anext__(), timeout=first_chunk_timeout)
                     except asyncio.TimeoutError:
                         await stream.aclose()
-                        raise TimeoutError("Gemini 首个chunk超时（超过3秒）")
+                        raise TimeoutError(f"Gemini 首个chunk超时（超过{first_chunk_timeout}秒）")
                     except StopAsyncIteration:
                         await stream.aclose()
                         raise RuntimeError("Gemini 未返回任何内容")
