@@ -252,7 +252,7 @@ class AICompletionPort:
             str: 每个流式回复片段
         """
         full_sequence = [
-            ("Gemini", self.gemini, "GEMINI_MODEL"),
+            ("Grok", self.grok, "GROK_MODEL"),
             ("Grok", self.grok, "GROK_MODEL"),
             ("Novel", self.novel, "NOVEL_MODEL"),
         ]
