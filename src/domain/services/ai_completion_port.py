@@ -8,12 +8,14 @@ from typing import Optional, Callable, AsyncGenerator, Dict, Any
 from demo.grok_async import AsyncGrokCaller
 from demo.novel_async import AsyncNovelCaller
 from demo.gemini_async import AsyncGeminiCaller
+from demo.deepseek_async import AsyncDeepseekCaller
 
 class AICompletionPort:
-    def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None, gemini_caller: Optional[AsyncGeminiCaller] = None):
+    def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None, gemini_caller: Optional[AsyncGeminiCaller] = None, deepseek_caller: Optional[AsyncDeepseekCaller] = None):
         self.grok = grok_caller
         self.novel = novel_caller
         self.gemini = gemini_caller
+        self.deepseek = deepseek_caller
         # 前3轮对话的增强指令模板
         self.early_conversation_instruction = (
             "##用户信息:{user_context}\n"
@@ -35,6 +37,13 @@ class AICompletionPort:
         except (TypeError, ValueError):
             print("⚠️ GEMINI_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
             self.gemini_first_chunk_timeout = 3.0
+
+        ds_timeout_str = os.getenv("DEEPSEEK_FIRST_CHUNK_TIMEOUT")
+        try:
+            self.deepseek_first_chunk_timeout = float(ds_timeout_str) if ds_timeout_str else 4.0
+        except (TypeError, ValueError):
+            print("⚠️ DEEPSEEK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 4 秒")
+            self.deepseek_first_chunk_timeout = 4.0
 
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
@@ -231,6 +240,30 @@ class AICompletionPort:
         print(f"🤖 AI流式生成完成 | 耗时: {time.time() - start:.2f}秒 | 总chunk数: {chunk_count} | 总字符数: {total_chars}")
         print("🤖" + "="*48)
 
+    @staticmethod
+    async def _stream_with_initial_timeout(generator, timeout: float, on_first_chunk: Callable[[], None], provider_name: str) -> AsyncGenerator[str, None]:
+        """
+        辅助方法：对异步生成器的首个chunk施加超时限制
+        """
+        try:
+            first_chunk = await asyncio.wait_for(generator.__anext__(), timeout=timeout)
+        except asyncio.TimeoutError:
+            await generator.aclose()
+            raise TimeoutError(f"{provider_name} 首个chunk超时（超过{timeout}秒）")
+        except StopAsyncIteration:
+            await generator.aclose()
+            raise RuntimeError(f"{provider_name} 未返回任何内容")
+        except Exception:
+            await generator.aclose()
+            raise
+
+        on_first_chunk()
+        yield first_chunk
+
+        async for chunk in generator:
+            on_first_chunk()
+            yield chunk
+
     async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
                                              max_retries=3, timeout=60, session_context_source=None,
                                              on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -252,7 +285,7 @@ class AICompletionPort:
             str: 每个流式回复片段
         """
         full_sequence = [
-            ("Grok", self.grok, "GROK_MODEL"),
+            ("DeepSeek", self.deepseek, "DEEPSEEK_MODEL"),
             ("Grok", self.grok, "GROK_MODEL"),
             ("Novel", self.novel, "NOVEL_MODEL"),
         ]
@@ -303,24 +336,22 @@ class AICompletionPort:
                                 print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
                         first_chunk_sent = True
 
+                # 根据提供方设定首个chunk的超时时间
                 if provider == "Gemini":
                     first_chunk_timeout = self.gemini_first_chunk_timeout or 3.0
-                    try:
-                        first_chunk = await asyncio.wait_for(stream.__anext__(), timeout=first_chunk_timeout)
-                    except asyncio.TimeoutError:
-                        await stream.aclose()
-                        raise TimeoutError(f"Gemini 首个chunk超时（超过{first_chunk_timeout}秒）")
-                    except StopAsyncIteration:
-                        await stream.aclose()
-                        raise RuntimeError("Gemini 未返回任何内容")
+                elif provider == "DeepSeek":
+                    first_chunk_timeout = self.deepseek_first_chunk_timeout or 4.0
+                else:
+                    # 其他提供方暂无强制首字超时限制，设为 None 意味着只受外层总 timeout 限制
+                    # 或者也可以复用 stream，但为了统一逻辑，这里我们直接 yield stream
+                    # 稍微优化一下：如果没有特殊超时需求，直接遍历即可，不走 wait_for 逻辑
+                    first_chunk_timeout = None
 
-                    _mark_first_chunk()
-                    yield first_chunk
-
-                    async for chunk in stream:
-                        _mark_first_chunk()
+                if first_chunk_timeout:
+                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _mark_first_chunk, provider):
                         yield chunk
                 else:
+                    # 无特殊首字超时限制的常规流式处理
                     async for chunk in stream:
                         _mark_first_chunk()
                         yield chunk
@@ -350,8 +381,10 @@ class AICompletionPort:
     def _select_default_caller(self) -> Optional[object]:
         """
         选择一个默认可用的调用器：
-        优先 Gemini，其次 Novel、Grok；如果都不存在则返回 None
+        优先 DeepSeek，其次 Gemini，其次 Novel、Grok；如果都不存在则返回 None
         """
+        if self.deepseek:
+            return self.deepseek
         if self.gemini:
             return self.gemini
         if self.novel:

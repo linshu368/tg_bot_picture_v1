@@ -204,6 +204,11 @@ def setup_container(settings) -> Container:
         return AsyncGeminiCaller()
     container.register_factory("gemini_caller", gemini_caller_factory)
 
+    def deepseek_caller_factory(c):
+        from demo.deepseek_async import AsyncDeepseekCaller
+        return AsyncDeepseekCaller()
+    container.register_factory("deepseek_caller", deepseek_caller_factory)
+
     def grok_caller_factory(c):
         from demo.grok_async import AsyncGrokCaller
         return AsyncGrokCaller()
@@ -220,7 +225,8 @@ def setup_container(settings) -> Container:
         return AICompletionPort(
             gemini_caller=c.get("gemini_caller"),
             grok_caller=c.get("grok_caller"),
-            novel_caller=c.get("novel_caller")
+            novel_caller=c.get("novel_caller"),
+            deepseek_caller=c.get("deepseek_caller")
         )
     
     container.register_factory("ai_completion_port", ai_completion_port_factory)
