@@ -132,6 +132,7 @@ def main() -> None:
         # 8. 启动服务
         port = int(os.getenv("PORT", 8000))
         logger.info(f"🚀 启动 Web Server (端口 {port}) 与 Text Bot...")
+        logger.info(f"✅ aiohttp starting on port: {port}")
         
         # 这种方式适用于 Railway，它会由 aiohttp 接管主进程
         web.run_app(app, port=port, print=None)
