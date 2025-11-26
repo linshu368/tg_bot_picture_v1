@@ -6,6 +6,15 @@ import logging
 from typing import Any, Dict, Optional
 from telegram import Update
 import re
+from src.infrastructure.monitoring.metrics import (
+    BOT_FIRST_RESPONSE_LATENCY,
+    BOT_FULL_RESPONSE_LATENCY,
+    BOT_RESPONSE_SUCCESS_TOTAL,
+    BOT_RESPONSE_FAILURE_TOTAL
+)
+
+# 统一的系统级兜底错误提示
+FALLBACK_ERROR_MESSAGE = "抱歉，回复出现了问题，后台正在加紧修复，请耐心等待"
 
 # 去除形如 <...> 的标签（HTML/样式标记等）
 _TAG_PATTERN = re.compile(r"<[^>]*>")
@@ -45,7 +54,7 @@ class StreamMessageService:
         except Exception:
             return ""
     
-    async def handle_stream_message(self, update: Update, user_id: str, content: str, ui_handler=None) -> None:
+    async def handle_stream_message(self, update: Update, user_id: str, content: str, ui_handler=None, start_time: Optional[float] = None) -> None:
         """
         处理流式回复消息的主要业务流程
         🆕 增强异常处理，确保用户状态正确释放
@@ -55,6 +64,7 @@ class StreamMessageService:
             user_id: 用户ID
             content: 消息内容
             ui_handler: UI处理器（用于构建回复键盘）
+            start_time: 消息开始处理的时间戳 (T1指标用)
             
         Raises:
             Exception: 重新抛出异常，让调用方（TextBot）处理状态释放
@@ -70,9 +80,17 @@ class StreamMessageService:
             session_info = await self._get_session_and_role(user_id, content)
             
             if session_info["code"] != 0:
-                # 处理错误情况
-                error_text = f"❌ 出错: {session_info['message']} (code={session_info['code']})"
+                # 处理错误情况（非业务预期内的系统错误需兜底）
+                # 业务错误码通常是 4002(过长), 4003(限额)，这些不需要兜底话术
+                # 但如果是其他未知错误，则视为工程侧异常
+                if session_info["code"] not in [4002, 4003]:
+                    BOT_RESPONSE_FAILURE_TOTAL.labels(error_type=f"session_error_{session_info['code']}").inc()
+                    await initial_msg.edit_text(FALLBACK_ERROR_MESSAGE)
+                else:
+                    # 业务预期错误，直接显示原消息
+                    error_text = f"❌ {session_info['message']}"
                 await initial_msg.edit_text(error_text)
+                    
                 self.logger.warning(f"⚠️ 用户 {user_id} 会话获取失败: {session_info['message']}")
                 return
             
@@ -93,10 +111,19 @@ class StreamMessageService:
                 context_source=context_source,
                 session_id=session_id,
                 user_message_id=data.get("user_message_id", ""),
-                ui_handler=ui_handler
+                ui_handler=ui_handler,
+                start_time=start_time
             )
             
             self.logger.info(f"✅ 用户 {user_id} 流式消息处理完成")
+            
+            # 🟢 T0 & T1: 记录成功与完整耗时
+            if start_time:
+                duration = time.time() - start_time
+                BOT_FULL_RESPONSE_LATENCY.observe(duration)
+            
+            role_id_tag = role_data.get("id", "unknown") if role_data else "unknown"
+            BOT_RESPONSE_SUCCESS_TOTAL.inc()
                 
         except Exception as e:
             # 🆕 详细记录异常信息
@@ -107,10 +134,11 @@ class StreamMessageService:
             
             # 🆕 尽力向用户显示错误信息
             try:
+                BOT_RESPONSE_FAILURE_TOTAL.labels(error_type=type(e).__name__).inc()
                 if initial_msg:
-                    await initial_msg.edit_text(f"抱歉，回复出现了问题，后台正在加紧修复，请耐心等待")
+                    await initial_msg.edit_text(FALLBACK_ERROR_MESSAGE)
                 else:
-                    await update.message.reply_text(f"抱歉，回复出现了问题，后台正在加紧修复，请耐心等待")
+                    await update.message.reply_text(FALLBACK_ERROR_MESSAGE)
             except Exception as msg_e:
                 self.logger.error(f"❌ 发送错误消息也失败: {msg_e}")
             
@@ -118,7 +146,7 @@ class StreamMessageService:
             raise
 
     async def _execute_granular_stream_reply(self, initial_msg, role_data, history, content, 
-                                           context_source, session_id, user_message_id, ui_handler):
+                                           context_source, session_id, user_message_id, ui_handler, start_time=None):
         """
         执行精细化的流式回复控制
         
@@ -176,7 +204,8 @@ class StreamMessageService:
                     first_chars_threshold=first_chars_threshold,
                     regular_update_interval=regular_update_interval,
                     last_update_time_ref=last_update_time_ref,
-                    initial_msg=initial_msg
+                    initial_msg=initial_msg,
+                    start_time=start_time
                 )
             
             # 从引用中获取最终值
@@ -280,7 +309,9 @@ class StreamMessageService:
                 self.logger.error(f"❌ 流式处理完成但无内容: session_id={session_id}, user_message_id={user_message_id}")
                 self.logger.error(f"❌ 原始用户输入: {content}")
                 self.logger.error(f"❌ 角色数据: role_id={role_data.get('id', 'unknown') if role_data else 'None'}")
-                await initial_msg.edit_text("抱歉，回复出现了问题，后台正在加紧修复，请耐心等待")
+                
+                BOT_RESPONSE_FAILURE_TOTAL.labels(error_type="EmptyResponse").inc()
+                await initial_msg.edit_text(FALLBACK_ERROR_MESSAGE)
                 
         except Exception as e:
             # 详细记录错误信息
@@ -290,12 +321,12 @@ class StreamMessageService:
             self.logger.error(f"完整堆栈:\n{traceback.format_exc()}")
             
             # 向用户显示更详细的错误信息
-            error_msg = str(e) if str(e) else f"{type(e).__name__} (无详细信息)"
-            await initial_msg.edit_text(f"❌ 生成失败: {error_msg}")
+            BOT_RESPONSE_FAILURE_TOTAL.labels(error_type=type(e).__name__).inc()
+            await initial_msg.edit_text(FALLBACK_ERROR_MESSAGE)
 
     async def _process_chunk_with_granular_control(self, chunk, accumulated_text_ref, phase_ref, 
                                                  first_chars_threshold, regular_update_interval, 
-                                                 last_update_time_ref, initial_msg):
+                                                 last_update_time_ref, initial_msg, start_time=None):
         """
         对大块进行字符级分割处理，实现精细化控制
         
@@ -324,6 +355,11 @@ class StreamMessageService:
                     try:
                         await initial_msg.edit_text(self._safe_text_for_telegram(accumulated_text))
                         phase = "regular_updates"
+                        
+                        # ⏱️ T1: 记录首响耗时（用户体验）
+                        if start_time:
+                            BOT_FIRST_RESPONSE_LATENCY.observe(time.time() - start_time)
+                            
                         last_update_time = current_time
                         self.logger.info(f"📤 首段更新完成: {char_count} 字符")
                     except Exception as e:

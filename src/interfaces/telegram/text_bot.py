@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import time
 from typing import Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,6 +16,8 @@ from telegram.ext import (
 )
 from src.interfaces.telegram.handlers.callback.text_bot_callback_handler import TextBotCallbackHandler
 from src.interfaces.telegram.ui_handler import UIHandler
+from src.infrastructure.monitoring.metrics import BOT_RESPONSE_FAILURE_TOTAL
+from src.core.services.stream_message_service import FALLBACK_ERROR_MESSAGE
 
 
 class DummyService:
@@ -341,6 +344,9 @@ class TextBot:
         if update.message is None or not update.message.text:
             return
         
+        # ⏱️ T1: 记录起始时间（用户发送消息到达 bot 的时刻）
+        start_time = time.time()
+        
         user_id = str(update.effective_user.id) if update.effective_user else "unknown"
         content = update.message.text
         self.logger.info("📥 消息 user_id=%s text=%s", user_id, content)
@@ -432,12 +438,15 @@ class TextBot:
 
             # 使用应用层的流式消息服务处理
             from src.core.services.stream_message_service import stream_message_service
-            await stream_message_service.handle_stream_message(update, user_id, content, self.ui_handler)
+            await stream_message_service.handle_stream_message(update, user_id, content, self.ui_handler, start_time=start_time)
 
         except Exception as e:
+            # 🔴 T0: 记录回复失败
+            BOT_RESPONSE_FAILURE_TOTAL.labels(error_type=type(e).__name__).inc()
+            
             self.logger.error(f"❌ 消息处理失败: {e}")
             try:
-                await update.message.reply_text("❌ 处理消息时出现错误，请重试")
+                await update.message.reply_text(FALLBACK_ERROR_MESSAGE)
             except:
                 pass
         finally:

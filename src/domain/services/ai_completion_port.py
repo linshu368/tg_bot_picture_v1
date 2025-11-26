@@ -9,6 +9,11 @@ from demo.grok_async import AsyncGrokCaller
 from demo.novel_async import AsyncNovelCaller
 from demo.gemini_async import AsyncGeminiCaller
 from demo.deepseek_async import AsyncDeepseekCaller
+from src.infrastructure.monitoring.metrics import (
+    AI_PROVIDER_CALLS_TOTAL,
+    AI_PROVIDER_CALLS_FAILED_TOTAL,
+    AI_FIRST_TOKEN_LATENCY
+)
 
 class AICompletionPort:
     def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None, gemini_caller: Optional[AsyncGeminiCaller] = None, deepseek_caller: Optional[AsyncDeepseekCaller] = None):
@@ -304,6 +309,12 @@ class AICompletionPort:
                 print(f"🔄 AI生成尝试 #{attempt + 1}/{total_attempts}")
                 print(f"🚀 本次尝试使用提供方: {provider} | 模型: {model_env}")
 
+                # 📊 T0: 记录 AI 调用次数
+                AI_PROVIDER_CALLS_TOTAL.labels(provider=provider, model=model_env or "unknown").inc()
+                
+                # ⏱️ T1: 记录 AI 请求发起时间
+                ai_req_start = time.time()
+
                 used_meta_candidate: Dict[str, Any] = {}
 
                 def _capture_used_instructions(meta: Dict[str, Any]) -> None:
@@ -329,6 +340,10 @@ class AICompletionPort:
                 def _mark_first_chunk() -> None:
                     nonlocal first_chunk_sent
                     if not first_chunk_sent:
+                        # ⏱️ T1: 记录 AI 首字耗时
+                        latency = time.time() - ai_req_start
+                        AI_FIRST_TOKEN_LATENCY.labels(provider=provider, model=model_env or "unknown").observe(latency)
+                        
                         if on_used_instructions and used_meta_candidate:
                             try:
                                 on_used_instructions(dict(used_meta_candidate))
@@ -360,6 +375,9 @@ class AICompletionPort:
                 return
 
             except Exception as e:
+                # 🔴 T0: 记录 AI 调用失败
+                AI_PROVIDER_CALLS_FAILED_TOTAL.labels(provider=provider, error_type=type(e).__name__).inc()
+                
                 print(f"❌ AI生成失败（第{attempt + 1}次尝试）: {e}")
 
                 if attempt == total_attempts - 1:
