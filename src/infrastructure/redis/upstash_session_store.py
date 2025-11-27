@@ -38,7 +38,7 @@ class UpstashSessionStore:
         return f"{self._ns}:last:{user_id}"
     
     # 限制每个会话最多存储 20 轮 (40条消息)，避免 Token 超限和成本失控
-    MAX_HISTORY_ITEMS = 40
+    MAX_HISTORY_ITEMS = 30
 
     async def _cmd(self, *args: str) -> Any:
         """
