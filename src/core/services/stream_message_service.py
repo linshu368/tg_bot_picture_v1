@@ -272,8 +272,10 @@ class StreamMessageService:
                         
                         # 🆕 新字段写入逻辑：round（以 session 维度的用户消息序号计算）
                         try:
-                            current_history = await message_service.get_history(session_id) or []
-                            round_num = sum(1 for m in current_history if isinstance(m, dict) and m.get("role") == "user")
+                            # 从 DB 获取已存储的轮次（不含当前），+1 即为当前轮次
+                            # 这样即使 Redis 历史被截断，也能得到正确的总轮数（前提是 Repo 实现了对应方法）
+                            stored_count = await message_service.get_session_user_turn_count(session_id)
+                            round_num = stored_count + 1
                         except Exception:
                             round_num = None
                         

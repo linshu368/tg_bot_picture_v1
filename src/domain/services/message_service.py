@@ -144,6 +144,27 @@ class MessageService:
         except Exception as e:
             self.logger.error(f"❌ 获取用户消息数量失败: {e}")
             return 0
+
+    async def get_session_user_turn_count(self, session_id: str) -> int:
+        """
+        获取会话中已持久化到数据库的用户消息数量。
+        注意：当前正在处理的（内存/Redis中刚追加的）用户消息通常尚未入库。
+        因此，当前轮次通常为 返回值 + 1。
+        """
+        try:
+            # 优先尝试调用仓储层的新方法（需要用户在 MessageRepository 中实现）
+            if self.message_repository and hasattr(self.message_repository, "get_session_user_turn_count"):
+                return await self.message_repository.get_session_user_turn_count(session_id)
+            
+            # 如果仓储层未实现，回退到基于当前历史计算
+            # 注意：Redis 历史包含当前刚追加的消息，而本方法语义是"已持久化/之前的"数量
+            # 所以这里减 1 以保持语义一致性（在未截断场景下）
+            history = await self.get_history(session_id, log=False)
+            count = sum(1 for m in history if isinstance(m, dict) and m.get("role") == "user")
+            return max(0, count - 1)
+        except Exception as e:
+            self.logger.error(f"❌ 获取会话轮次失败: {e}")
+            return 0
     
     async def check_daily_limit(self, user_id: str, daily_limit: int = None) -> dict:
         """

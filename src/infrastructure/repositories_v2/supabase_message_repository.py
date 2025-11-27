@@ -301,6 +301,39 @@ class SupabaseMessageRepository:
         
         return asyncio.create_task(_safe_save())
     
+    async def get_session_user_turn_count(self, session_id: str) -> int:
+        """
+        统计会话中用户消息的轮数
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            用户消息数量
+        """
+        try:
+            client = self.supabase_manager.get_client()
+            
+            def _sync_count():
+                # 简单统计 user_id 对应的 user 消息数
+                # 或者更严谨地：统计 session_id 下 sender='user' (或 role_id不为空) 的记录数
+                # 这里使用 sender='user' 来区分
+                return client.table(self.table_name)\
+                    .select("id", count="exact")\
+                    .eq("session_id", session_id)\
+                    .gt("round", 0)\
+                    .execute()
+            
+            result = await asyncio.to_thread(_sync_count)
+            
+            count = result.count or 0
+            # self.logger.info(f"📊 会话用户轮数统计: session_id={session_id}, count={count}")
+            return count
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取会话用户轮数失败: {e}")
+            return 0
+
     async def _get_last_round_row(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取会话中最新一轮（最大 round）的行"""
         try:

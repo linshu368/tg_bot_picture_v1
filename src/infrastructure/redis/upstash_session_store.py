@@ -36,6 +36,9 @@ class UpstashSessionStore:
     
     def _key_last_session(self, user_id: str) -> str:
         return f"{self._ns}:last:{user_id}"
+    
+    # 限制每个会话最多存储 30 轮 (60条消息)，避免 Token 超限和成本失控
+    MAX_HISTORY_ITEMS = 60
 
     async def _cmd(self, *args: str) -> Any:
         """
@@ -190,6 +193,12 @@ class UpstashSessionStore:
         # Upstash 支持：/rpush/{key}/{value1}/{value2}/...
         values = [json.dumps(m, ensure_ascii=False) for m in messages]
         await self._cmd("rpush", key, *values)
+        
+        # 强制截断：防止全量重写导致列表过长
+        try:
+            await self._cmd("ltrim", key, -self.MAX_HISTORY_ITEMS, -1)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"set_messages ltrim 失败: {e}")
 
         # 等待一段时间，确保数据同步到 Redis
         # time.sleep(1)  # 等待 3 秒，确保数据完全写入
@@ -204,6 +213,8 @@ class UpstashSessionStore:
         try:
             # 原子追加，避免“读-改-写”并发覆盖
             await self._cmd("rpush", key, json.dumps(message, ensure_ascii=False))
+            # 自动滑动窗口：只保留最近 MAX_HISTORY_ITEMS 条
+            await self._cmd("ltrim", key, -self.MAX_HISTORY_ITEMS, -1)
         except Exception:
             # 可能是旧 KV/JSON 存储导致类型冲突：回退迁移
             try:
