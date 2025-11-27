@@ -4,7 +4,7 @@ FROM grafana/alloy:latest
 EXPOSE 12345
 
 # 复制配置文件到容器内
-COPY config.alloy /etc/alloy/config.alloy
+COPY deploy/grafana_alloy/config.alloy /etc/alloy/config.alloy
 
 # 启动 Alloy
 # --server.http.listen-addr 用于本地调试界面
