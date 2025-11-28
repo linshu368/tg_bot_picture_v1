@@ -26,9 +26,9 @@ prometheus.remote_write "grafana_cloud" {
   endpoint {
     url = sys.env("GRAFANA_PROMETHEUS_URL")
 
-    // ✅ 正确的 Bearer Token 写法（已修复你的语法错误）
+    // ✅ 关键：末尾必须有逗号 ,
     headers = {
-      Authorization = "Bearer " + sys.env("GRAFANA_CLOUD_WRITE_TOKEN")
+      Authorization = "Bearer " + sys.env("GRAFANA_CLOUD_WRITE_TOKEN"),
     }
 
     tls_config {
