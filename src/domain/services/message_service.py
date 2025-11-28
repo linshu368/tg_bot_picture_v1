@@ -5,8 +5,8 @@ from typing import Optional, Dict, Any, List
 
 class MessageService:
     def __init__(self, message_repository=None, session_service=None, redis_store=None):
-        self._store = {}  # { session_id: [ {role, content, message_id} ] }
-        self._history_loaded = {}  # { session_id: bool }
+        # 仅在无 Redis 配置时使用的内存回退存储，不作为缓存使用
+        self._memory_fallback = {}  # { session_id: [ {role, content, message_id} ] }
         self.message_repository = message_repository
         self.session_service = session_service
         self.redis_store = redis_store
@@ -26,25 +26,31 @@ class MessageService:
             "content": content
         }
         
-        history = await self.get_history(session_id, log=False)
-        history.append(message_data)
-        self._store[session_id] = history
-        self._history_loaded[session_id] = True
+        current_count = 0
         
-        # 写穿到 Redis（Upstash REST / RedisJSON）
+        # 核心逻辑：直接操作 Redis，移除本地内存缓存同步
         if self.redis_store:
             try:
                 await self.redis_store.append_message(session_id, message_data)
                 # 兜底：确保会话书签与元信息已持久化，避免重启后丢失 session 指针/角色
                 if self.session_service:
                     await self._ensure_session_persisted(session_id)
+                # 获取当前长度用于日志（可选，为了性能可以去掉）
+                # messages = await self.redis_store.get_messages(session_id)
+                # current_count = len(messages)
             except Exception as _e:
-                self.logger.debug(f"写穿 Redis 失败: {session_id}, err={_e}")
+                self.logger.error(f"写穿 Redis 失败: {session_id}, err={_e}")
+        else:
+            # 无 Redis 配置时的降级处理
+            if session_id not in self._memory_fallback:
+                self._memory_fallback[session_id] = []
+            self._memory_fallback[session_id].append(message_data)
+            current_count = len(self._memory_fallback[session_id])
         
         # 打印保存的消息信息
         print(f"💾 保存消息 | Session: {session_id} | Role: {role} | ID: {message_id}")
         # print(f"📝 内容: {content}")
-        print(f"📊 当前会话消息数: {len(self._store[session_id])}")
+        # print(f"📊 当前会话消息数: {current_count}")
         print("-" * 50)
         
         # 异步写入Supabase（如果配置了message_repository）
@@ -251,26 +257,29 @@ class MessageService:
 
     async def get_history(self, session_id: str, force: bool = False, log: bool = True) -> List[Dict[str, Any]]:
         """
-        获取会话历史；当启用 Redis 时，优先从 Redis 读取并回填到内存
+        获取会话历史
+        - 优先从 Redis 直接读取（无状态）
+        - 无 Redis 时降级到内存回退存储
+        - force 参数不再生效，为兼容保留
         """
         if not session_id:
             return []
-        if not force and self._history_loaded.get(session_id):
-            history = self._store.get(session_id, [])
+            
+        history = []
+        source = "Memory"
+        
+        if self.redis_store:
+            try:
+                history = await self.redis_store.get_messages(session_id)
+                source = "Redis"
+            except Exception as _e:
+                self.logger.error(f"从 Redis 获取历史失败: {session_id}, err={_e}")
+                history = []
         else:
-            history = []
-            if self.redis_store:
-                try:
-                    history = await self.redis_store.get_messages(session_id)
-                except Exception as _e:
-                    self.logger.debug(f"从 Redis 获取历史失败: {session_id}, err={_e}")
-                    history = self._store.get(session_id, [])
-            else:
-                history = self._store.get(session_id, [])
-            self._store[session_id] = history or []
-            self._history_loaded[session_id] = True
+            history = self._memory_fallback.get(session_id, [])
+            
         if log:
-            print(f"📚 获取历史记录 | Session: {session_id} | 消息数量: {len(history)}")
+            print(f"📚 获取历史({source}) | Session: {session_id} | 消息数量: {len(history)}")
             if history:
                 print("📖 历史消息内容:")
                 for i, msg in enumerate(history):
@@ -286,8 +295,8 @@ class MessageService:
     
     async def ensure_history_loaded(self, session_id: str, force: bool = False) -> int:
         """
-        异步确保内存中存在会话历史；若为空或 force=True 则从 Redis 读取回填
-        Returns: 加载后的消息数
+        [适配器方法] 异步确保历史已加载
+        现在直接调用 get_history 即可，因为不再维护本地缓存状态
         """
         history = await self.get_history(session_id, force=force)
         return len(history)
@@ -296,25 +305,20 @@ class MessageService:
     async def regenerate_reply(self, session_id: str, last_message_id: str, ai_port, role_data, session_context_source=None):
         """
         基于指定用户消息重新生成回复
-        - 精确定位 last_message_id
-        - 删除旧的 Bot 回复
-        - 保存新的 Bot 回复
-        
-        Args:
-            session_context_source: 会话上下文来源，"snapshot" 表示快照会话
+        - 读 Redis -> 修剪 -> 写回 Redis -> 生成 -> 追加 Redis
         """
-        # 确保在异步上下文中优先从 Redis 回填历史
+        # 1. 获取历史 (直接从 Redis)
         history = await self.get_history(session_id)
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"[DEBUG] regenerate_reply: session_id={session_id}, last_message_id={last_message_id}")
-        logger.info(f"[DEBUG] regenerate_reply: current history={history}")
+        # logger.info(f"[DEBUG] regenerate_reply: current history={history}")
 
         if not history:
             logger.warning(f"[DEBUG] regenerate_reply: history is empty for session_id={session_id}")
             return {"message_id": None, "reply": "⚠️ 没有找到历史记录"}
 
-        # 1. 定位到用户消息
+        # 2. 定位到用户消息
         target_index = next(
             (i for i, msg in enumerate(history) if msg["message_id"] == last_message_id and msg["role"] == "user"),
             None
@@ -331,19 +335,21 @@ class MessageService:
         user_input = history[target_index]["content"]
         logger.info(f"[DEBUG] regenerate_reply: found user_input={user_input}")
 
-        # 2. 删除该用户消息之后的 Bot 回复
+        # 3. 删除该用户消息之后的 Bot 回复
         history = history[:target_index + 1]
-        self._store[session_id] = history
-        self._history_loaded[session_id] = True
-        # 覆盖写回 Redis
+        
+        # 4. 覆盖写回 (Redis优先)
         if self.redis_store:
             try:
                 await self.redis_store.set_messages(session_id, history)
             except Exception as _e:
-                logger.debug(f"回写 Redis 失败(regenerate trim): {session_id}, err={_e}")
-        logger.info(f"[DEBUG] regenerate_reply: trimmed history={history}")
+                logger.error(f"回写 Redis 失败(regenerate trim): {session_id}, err={_e}")
+        else:
+            self._memory_fallback[session_id] = history
+            
+        logger.info(f"[DEBUG] regenerate_reply: trimmed history length={len(history)}")
 
-        # 3. 重新生成 AI 回复（使用流式生成并收集完整回复）
+        # 5. 重新生成 AI 回复（使用流式生成并收集完整回复）
         reply = ""
         used_instructions_meta: Dict[str, Any] = {}
         def _on_used_instructions(meta: Dict[str, Any]) -> None:
@@ -353,6 +359,9 @@ class MessageService:
                     used_instructions_meta.update(meta)
             except Exception:
                 pass
+        
+        # 注意：这里调用 ai_port.generate_reply_stream_with_retry 时传入了修剪后的 history
+        # AI Port 会基于这个 history 构造 prompt
         async for chunk in ai_port.generate_reply_stream_with_retry(
             role_data=role_data,
             history=history,
@@ -364,16 +373,18 @@ class MessageService:
             reply += chunk
         logger.info(f"[DEBUG] regenerate_reply: new reply={reply}")
 
-        # 4. 删除旧的 Bot 回复并保存新的 Bot 回复（保持严格 user-bot 交替）
+        # 6. 删除旧的 Bot 回复并保存新的 Bot 回复（保持严格 user-bot 交替）
         try:
             if self.message_repository:
                 await self.message_repository.delete_last_bot_message(session_id)
         except Exception as e:
             logger.debug(f"删除旧机器人消息失败(regenerate): {e}")
+            
+        # save_message 会处理 Redis 的追加
         bot_message_id = await self.save_message(session_id, "assistant", reply)
         logger.info(f"[DEBUG] regenerate_reply: saved new bot_message_id={bot_message_id}")
         
-        # 4.1 覆盖最新用户消息中的 bot_reply/history/model（不新增用户行）
+        # 7. 覆盖最新用户消息中的 bot_reply/history/model
         try:
             if self.message_repository:
                 model_name = used_instructions_meta.get("model_name") or used_instructions_meta.get("model")
@@ -411,13 +422,6 @@ class MessageService:
     async def truncate_history_after_message(self, session_id: str, user_message_id: str) -> Optional[str]:
         """
         截断指定用户消息之后的所有回复，并返回用户消息内容
-        
-        Args:
-            session_id: 会话ID
-            user_message_id: 用户消息ID
-            
-        Returns:
-            用户消息内容，如果找不到则返回None
         """
         history = await self.get_history(session_id)
         logger = logging.getLogger(__name__)
@@ -446,14 +450,16 @@ class MessageService:
 
         # 2. 删除该用户消息之后的所有回复
         truncated_history = history[:target_index + 1]
-        self._store[session_id] = truncated_history
-        self._history_loaded[session_id] = True
-        # 覆盖写回 Redis
+        
+        # 3. 覆盖写回 Redis
         if self.redis_store:
             try:
                 await self.redis_store.set_messages(session_id, truncated_history)
             except Exception as _e:
-                logger.debug(f"回写 Redis 失败(truncate): {session_id}, err={_e}")
+                logger.error(f"回写 Redis 失败(truncate): {session_id}, err={_e}")
+        else:
+            self._memory_fallback[session_id] = truncated_history
+            
         logger.info(f"[DEBUG] truncate_history_after_message: truncated history length={len(truncated_history)}")
         
         # 打印截断信息
@@ -465,7 +471,8 @@ class MessageService:
 
     async def restore_history_to_memory(self, session_id: str, messages: List[Dict[str, str]]) -> int:
         """
-        仅在内存中恢复历史消息（用于快照会话），不保存到数据库
+        恢复历史消息到会话存储（Redis/Memory）
+        (方法名保持兼容，实际逻辑已改为写穿 Redis)
         
         Args:
             session_id: 会话ID
@@ -477,7 +484,7 @@ class MessageService:
         if not messages:
             return 0
         
-        # 生成消息ID并构造内存格式
+        # 生成消息ID并构造标准格式
         restored_messages = []
         for m in messages:
             role = m.get("role", "")
@@ -492,17 +499,16 @@ class MessageService:
                 }
                 restored_messages.append(message_data)
         
-        # 直接写入内存存储，不触发数据库保存
-        self._store[session_id] = restored_messages
-        self._history_loaded[session_id] = True
-        # 覆盖写回 Redis
+        # 写入存储 (优先 Redis)
         if self.redis_store:
             try:
                 await self.redis_store.set_messages(session_id, restored_messages)
             except Exception as _e:
-                self.logger.debug(f"回写 Redis 失败(restore): {session_id}, err={_e}")
+                self.logger.error(f"回写 Redis 失败(restore): {session_id}, err={_e}")
+        else:
+            self._memory_fallback[session_id] = restored_messages
         
-        self.logger.info(f"🔄 快照历史已恢复到内存: session_id={session_id}, count={len(restored_messages)}")
+        self.logger.info(f"🔄 快照历史已恢复到存储: session_id={session_id}, count={len(restored_messages)}")
         print(f"🔄 快照历史恢复 | Session: {session_id} | 恢复消息数: {len(restored_messages)}")
         print("📋 恢复的消息:")
         for i, msg in enumerate(restored_messages):
