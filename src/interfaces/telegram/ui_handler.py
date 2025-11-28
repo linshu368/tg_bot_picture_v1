@@ -11,18 +11,15 @@ class UIHandler:
         if not session_id:
             logging.warning(f"⚠️ callback_data 被禁用: session_id={session_id}, user_message_id={user_message_id}")
             keyboard = [[InlineKeyboardButton("🆕 新的对话", callback_data="new_session")]]
-        # 情况2：有 session_id 但没有 user_message_id，不显示重新生成，但允许保存对话
+        # 情况2：有 session_id 但没有 user_message_id，仅显示新对话与保存
         elif not user_message_id:
             keyboard = [[
                 InlineKeyboardButton("🆕 新的对话", callback_data=f"new_session:{session_id}"),
                 InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
             ]]
-        # 情况3：二者都有，显示三键
+        # 情况3：二者都有，仍只显示新对话与保存（暂时下线重新生成）
         else:
-            callback_data = f"regenerate:{session_id}:{user_message_id}"
-            logging.info(f"✅ callback_data={callback_data}")
             keyboard = [[
-                InlineKeyboardButton("🔄 重新生成", callback_data=callback_data),
                 InlineKeyboardButton("🆕 新的对话", callback_data=f"new_session:{session_id}"),
                 InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
             ]]
