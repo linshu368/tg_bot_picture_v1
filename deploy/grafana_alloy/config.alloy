@@ -26,11 +26,14 @@ prometheus.remote_write "grafana_cloud" {
   endpoint {
     // 引用环境变量
     url = sys.env("GRAFANA_PROMETHEUS_URL")
+    bearer_token = sys.env("GRAFANA_CLOUD_WRITE_TOKEN")
+    
 
-    basic_auth {
-      username = sys.env("GRAFANA_USERNAME")
-      password = sys.env("GRAFANA_PASSWORD")
-    }
+
+    //basic_auth {
+    //  username = sys.env("GRAFANA_USERNAME")
+     // password = sys.env("GRAFANA_PASSWORD")
+    //}
   }
 }
 
