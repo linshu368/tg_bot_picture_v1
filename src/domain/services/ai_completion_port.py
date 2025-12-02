@@ -246,7 +246,7 @@ class AICompletionPort:
         print("🤖" + "="*48)
 
     @staticmethod
-    async def _stream_with_initial_timeout(generator, timeout: float, on_first_chunk: Callable[[], None], provider_name: str) -> AsyncGenerator[str, None]:
+    async def _stream_with_initial_timeout(generator, timeout: float, on_chunk_received: Callable[[str], None], provider_name: str) -> AsyncGenerator[str, None]:
         """
         辅助方法：对异步生成器的首个chunk施加超时限制
         """
@@ -262,11 +262,11 @@ class AICompletionPort:
             await generator.aclose()
             raise
 
-        on_first_chunk()
+        on_chunk_received(first_chunk)
         yield first_chunk
 
         async for chunk in generator:
-            on_first_chunk()
+            on_chunk_received(chunk)
             yield chunk
 
     async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
@@ -335,21 +335,34 @@ class AICompletionPort:
                     apply_enhancement=apply_enhancement
                 )
 
-                first_chunk_sent = False
+                # 追踪累积字符数，以实现"前5个字符"的Latency记录（与 Bot 侧体验指标对齐）
+                accumulated_chars_count = 0
+                metric_recorded = False
+                METRIC_CHAR_THRESHOLD = 5
 
-                def _mark_first_chunk() -> None:
-                    nonlocal first_chunk_sent
-                    if not first_chunk_sent:
-                        # ⏱️ T1: 记录 AI 首字耗时
+                def _track_chunk_and_record_metric(chunk_text: str) -> None:
+                    nonlocal accumulated_chars_count, metric_recorded
+                    
+                    if metric_recorded:
+                        return
+
+                    # 累加字符
+                    accumulated_chars_count += len(chunk_text)
+                    
+                    # 如果满足条件（字符数>=阈值），则记录指标
+                    if accumulated_chars_count >= METRIC_CHAR_THRESHOLD:
+                        # ⏱️ T1: 记录 AI "首响"(前5字符)耗时
                         latency = time.time() - ai_req_start
                         AI_FIRST_TOKEN_LATENCY.labels(provider=provider, model=model_env or "unknown").observe(latency)
                         
+                        # 触发指令元数据回调（在首响达成时触发一次即可）
                         if on_used_instructions and used_meta_candidate:
                             try:
                                 on_used_instructions(dict(used_meta_candidate))
                             except Exception as _e:
                                 print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
-                        first_chunk_sent = True
+                        
+                        metric_recorded = True
 
                 # 根据提供方设定首个chunk的超时时间
                 if provider == "Gemini":
@@ -357,18 +370,16 @@ class AICompletionPort:
                 elif provider == "DeepSeek":
                     first_chunk_timeout = self.deepseek_first_chunk_timeout or 4.0
                 else:
-                    # 其他提供方暂无强制首字超时限制，设为 None 意味着只受外层总 timeout 限制
-                    # 或者也可以复用 stream，但为了统一逻辑，这里我们直接 yield stream
-                    # 稍微优化一下：如果没有特殊超时需求，直接遍历即可，不走 wait_for 逻辑
+                    # 其他提供方暂无强制首字超时限制
                     first_chunk_timeout = None
 
                 if first_chunk_timeout:
-                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _mark_first_chunk, provider):
+                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _track_chunk_and_record_metric, provider):
                         yield chunk
                 else:
                     # 无特殊首字超时限制的常规流式处理
                     async for chunk in stream:
-                        _mark_first_chunk()
+                        _track_chunk_and_record_metric(chunk)
                         yield chunk
 
                 print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")

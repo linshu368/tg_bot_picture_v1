@@ -67,10 +67,10 @@ AI_PROVIDER_CALLS_FAILED_TOTAL = Counter(
 # ==============================================================================
 
 # 5. bot_first_response_latency_seconds
-# 用户发送消息 -> 第一个 AI 流式 chunk 到达 的耗时
+# 用户发送消息 -> 累积收到前5个字符并推送到 Telegram 的耗时
 BOT_FIRST_RESPONSE_LATENCY = Histogram(
     'bot_first_response_latency_seconds',
-    'Latency from user message to first stream chunk (seconds)',
+    'Latency from user message to first 5 chars pushed to TG (seconds)',
     buckets=(0.1, 0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 5.0, float('inf'))
 )
 
@@ -83,10 +83,10 @@ BOT_FULL_RESPONSE_LATENCY = Histogram(
 )
 
 # 7. ai_first_token_latency_seconds
-# AI Completion API 请求发起 -> 第一个 chunk 到达 的耗时
+# AI Completion API 请求发起 -> 累积收到前5个字符 的耗时
 AI_FIRST_TOKEN_LATENCY = Histogram(
     'ai_first_token_latency_seconds',
-    'Latency from AI request to first token received (seconds)',
+    'Latency from AI request to first 5 chars received (seconds)',
     labelnames=['provider', 'model'],
     buckets=(0.1, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0, float('inf'))
 )
