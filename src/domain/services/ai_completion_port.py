@@ -435,6 +435,9 @@ class AICompletionPort:
                     print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）| 触发完整回复限时 {full_response_timeout}s")
                 else:
                     print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
+
+                # 🆕 结束标志：为了消除“消息未回完”的误解，统一添加结束符
+                yield "\n●"
                 return
 
             except Exception as e:
