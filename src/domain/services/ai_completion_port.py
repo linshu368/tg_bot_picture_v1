@@ -50,6 +50,13 @@ class AICompletionPort:
             print("⚠️ DEEPSEEK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 4 秒")
             self.deepseek_first_chunk_timeout = 4.0
 
+        grok_timeout_str = os.getenv("GROK_FIRST_CHUNK_TIMEOUT")
+        try:
+            self.grok_first_chunk_timeout = float(grok_timeout_str) if grok_timeout_str else 3.0
+        except (TypeError, ValueError):
+            print("⚠️ GROK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
+            self.grok_first_chunk_timeout = 3.0
+
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
         """Return a logging-safe preview of text, avoiding Unicode surrogate errors.
@@ -369,6 +376,8 @@ class AICompletionPort:
                     first_chunk_timeout = self.gemini_first_chunk_timeout or 3.0
                 elif provider == "DeepSeek":
                     first_chunk_timeout = self.deepseek_first_chunk_timeout or 4.0
+                elif provider == "Grok":
+                    first_chunk_timeout = self.grok_first_chunk_timeout or 3.0
                 else:
                     # 其他提供方暂无强制首字超时限制
                     first_chunk_timeout = None
