@@ -1,6 +1,7 @@
 import uuid
 import asyncio
 import logging
+import time
 from typing import Optional, Dict, Any, List
 
 class MessageService:
@@ -351,6 +352,7 @@ class MessageService:
 
         # 5. 重新生成 AI 回复（使用流式生成并收集完整回复）
         reply = ""
+        first_chunk_ts: Optional[float] = None
         used_instructions_meta: Dict[str, Any] = {}
         def _on_used_instructions(meta: Dict[str, Any]) -> None:
             try:
@@ -370,8 +372,14 @@ class MessageService:
             on_used_instructions=_on_used_instructions,
             apply_enhancement=False
         ):
+            if first_chunk_ts is None:
+                first_chunk_ts = time.time()
             reply += chunk
         logger.info(f"[DEBUG] regenerate_reply: new reply={reply}")
+
+        full_response_seconds: Optional[int] = None
+        if first_chunk_ts:
+            full_response_seconds = max(0, int(time.time() - first_chunk_ts))
 
         # 6. 删除旧的 Bot 回复并保存新的 Bot 回复（保持严格 user-bot 交替）
         try:
@@ -407,7 +415,8 @@ class MessageService:
                     session_id=session_id,
                     bot_reply=reply,
                     history=history_json_str,
-                    model_name=model_name
+                    model_name=model_name,
+                    full_response=full_response_seconds
                 )
         except Exception as e:
             logger.debug(f"覆盖最新用户消息失败(regenerate): {e}")

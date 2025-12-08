@@ -57,6 +57,16 @@ class AICompletionPort:
             print("⚠️ GROK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
             self.grok_first_chunk_timeout = 3.0
 
+        full_timeout_str = os.getenv("AI_FULL_RESPONSE_TIMEOUT")
+        try:
+            parsed_full_timeout = float(full_timeout_str) if full_timeout_str else 30.0
+            if parsed_full_timeout <= 0:
+                raise ValueError("AI_FULL_RESPONSE_TIMEOUT must be positive")
+            self.full_response_timeout = parsed_full_timeout
+        except (TypeError, ValueError):
+            print("⚠️ AI_FULL_RESPONSE_TIMEOUT 配置无效，使用默认值 30 秒")
+            self.full_response_timeout = 30.0
+
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
         """Return a logging-safe preview of text, avoiding Unicode surrogate errors.
@@ -346,6 +356,9 @@ class AICompletionPort:
                 accumulated_chars_count = 0
                 metric_recorded = False
                 METRIC_CHAR_THRESHOLD = 5
+                full_response_timeout = self.full_response_timeout
+                response_deadline: Optional[float] = None
+                full_timeout_triggered = False
 
                 def _track_chunk_and_record_metric(chunk_text: str) -> None:
                     nonlocal accumulated_chars_count, metric_recorded
@@ -371,6 +384,14 @@ class AICompletionPort:
                         
                         metric_recorded = True
 
+                def _ensure_full_response_deadline_started() -> None:
+                    nonlocal response_deadline
+                    if full_response_timeout and response_deadline is None:
+                        response_deadline = time.time() + full_response_timeout
+
+                def _is_full_response_timeout_reached() -> bool:
+                    return response_deadline is not None and time.time() >= response_deadline
+
                 # 根据提供方设定首个chunk的超时时间
                 if provider == "Gemini":
                     first_chunk_timeout = self.gemini_first_chunk_timeout or 3.0
@@ -382,16 +403,38 @@ class AICompletionPort:
                     # 其他提供方暂无强制首字超时限制
                     first_chunk_timeout = None
 
+                def _on_chunk_with_tracking(chunk_text: str) -> None:
+                    _ensure_full_response_deadline_started()
+                    _track_chunk_and_record_metric(chunk_text)
+
                 if first_chunk_timeout:
-                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _track_chunk_and_record_metric, provider):
+                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _on_chunk_with_tracking, provider):
                         yield chunk
+                        if _is_full_response_timeout_reached():
+                            full_timeout_triggered = True
+                            print(f"⏱️ 达到 AI 完整回复超时阈值（{full_response_timeout}s），提前结束输出")
+                            break
                 else:
                     # 无特殊首字超时限制的常规流式处理
                     async for chunk in stream:
+                        _ensure_full_response_deadline_started()
                         _track_chunk_and_record_metric(chunk)
                         yield chunk
+                        if _is_full_response_timeout_reached():
+                            full_timeout_triggered = True
+                            print(f"⏱️ 达到 AI 完整回复超时阈值（{full_response_timeout}s），提前结束输出")
+                            break
 
-                print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
+                if full_timeout_triggered and hasattr(stream, "aclose"):
+                    try:
+                        await stream.aclose()
+                    except Exception as close_err:
+                        print(f"⚠️ 关闭流式生成器失败: {close_err}")
+
+                if full_timeout_triggered:
+                    print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）| 触发完整回复限时 {full_response_timeout}s")
+                else:
+                    print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
                 return
 
             except Exception as e:

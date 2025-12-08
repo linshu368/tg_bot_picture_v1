@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 import uuid
 from telegram.ext import ContextTypes
@@ -182,6 +183,8 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         accumulated_text_ref = [accumulated_text]
         phase_ref = [phase]
         last_update_time_ref = [last_update_time]
+        first_chunk_timestamp_ref = [None]
+        full_response_seconds: Optional[int] = None
         
         try:
             # 使用带重试机制的流式生成
@@ -210,11 +213,15 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                     first_chars_threshold=first_chars_threshold,
                     regular_update_interval=regular_update_interval,
                     last_update_time_ref=last_update_time_ref,
-                    initial_msg=initial_msg
+                    initial_msg=initial_msg,
+                    first_chunk_timestamp_ref=first_chunk_timestamp_ref
                 )
             
             # 从引用中获取最终值
             accumulated_text = accumulated_text_ref[0]
+            if first_chunk_timestamp_ref[0]:
+                import time as _time
+                full_response_seconds = max(0, int(_time.time() - first_chunk_timestamp_ref[0]))
             
             # 阶段3：立即最终更新
             if accumulated_text:
@@ -280,7 +287,8 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                                             session_id=session_id,
                                             bot_reply=self._safe_text_for_telegram(accumulated_text),
                                             history=history_json_str,
-                                            model_name=model_name
+                                            model_name=model_name,
+                                            full_response=full_response_seconds
                                         )
                                         self.logger.info(f"🔄 已覆盖最新用户消息的回复(重新生成): session_id={session_id}")
                             except Exception as inner_e:
@@ -309,7 +317,8 @@ class TextBotCallbackHandler(BaseCallbackHandler):
 
     async def _process_chunk_with_granular_control(self, chunk, accumulated_text_ref, phase_ref, 
                                                  first_chars_threshold, regular_update_interval, 
-                                                 last_update_time_ref, initial_msg):
+                                                 last_update_time_ref, initial_msg,
+                                                 first_chunk_timestamp_ref=None):
         """
         对大块进行字符级分割处理，实现精细化控制
         复用StreamMessageService的逻辑
@@ -326,6 +335,8 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             accumulated_text += char
             char_count = len(accumulated_text)
             current_time = time.time()
+            if first_chunk_timestamp_ref is not None and first_chunk_timestamp_ref[0] is None:
+                first_chunk_timestamp_ref[0] = current_time
             
             if phase == "collecting_first_chars":
                 # 阶段1：收集前N个字符后立即更新

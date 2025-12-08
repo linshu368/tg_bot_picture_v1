@@ -27,7 +27,8 @@ class SupabaseMessageRepository:
                           history: Optional[str] = None,
                           model_name: Optional[str] = None,
                           user_input: Optional[str] = None,
-                          round: Optional[int] = None) -> Optional[str]:
+                          round: Optional[int] = None,
+                          full_response: Optional[int] = None) -> Optional[str]:
         """
         保存消息到Supabase
         
@@ -42,6 +43,7 @@ class SupabaseMessageRepository:
             model_name: 使用的AI模型名称
             user_input: 用户输入内容
             round: 对话轮次
+            full_response: 首个chunk出现到回复完成的耗时（秒，int4）
             
         Returns:
             消息记录的ID，失败返回None
@@ -73,6 +75,15 @@ class SupabaseMessageRepository:
             if bot_reply is not None and user_input is None and round is None:
                 # 允许 bot 先写，但建议尽快补充 round 以实现一轮一行管理
                 self.logger.debug("ℹ️ 检测到仅 bot_reply 写入且 round 缺失（允许短暂存在，建议后续补充 round 与 user_input）")
+            if full_response is not None:
+                try:
+                    full_response_int = int(full_response)
+                    if full_response_int < 0:
+                        raise ValueError("full_response must be non-negative")
+                    full_response = full_response_int
+                except Exception:
+                    self.logger.error(f"❌ full_response 必须为非负整数，当前值: {full_response}")
+                    return None
             
             # 构造消息数据
             message_data = {
@@ -94,6 +105,8 @@ class SupabaseMessageRepository:
                 message_data["user_input"] = user_input
             if round is not None:
                 message_data["round"] = round
+            if full_response is not None:
+                message_data["full_response"] = full_response
             
             # 异步插入数据（使用线程池避免阻塞主线程）
             def _sync_insert():
@@ -256,7 +269,8 @@ class SupabaseMessageRepository:
                                                       history: Optional[str] = None,
                                                       model_name: Optional[str] = None,
                                                       user_input: Optional[str] = None,
-                                                      round: Optional[int] = None) -> asyncio.Task:
+                                                      round: Optional[int] = None,
+                                                      full_response: Optional[int] = None) -> asyncio.Task:
         """
         异步保存用户消息（使用AI生成时的真实数据内容）
         
@@ -272,6 +286,7 @@ class SupabaseMessageRepository:
             model_name: 使用的AI模型名称
             user_input: 用户输入内容
             round: 对话轮次
+            full_response: 首个chunk到回复结束的耗时（秒）
             
         Returns:
             asyncio.Task: 可以await的任务对象
@@ -289,7 +304,8 @@ class SupabaseMessageRepository:
                     history=history,
                     model_name=model_name,
                     user_input=user_input,
-                    round=round
+                    round=round,
+                    full_response=full_response
                 )
                 
                 if result:
@@ -378,7 +394,8 @@ class SupabaseMessageRepository:
     async def update_last_user_message_reply(self, session_id: str, 
                                             bot_reply: Optional[str] = None,
                                             history: Optional[str] = None,
-                                            model_name: Optional[str] = None) -> bool:
+                                            model_name: Optional[str] = None,
+                                            full_response: Optional[int] = None) -> bool:
         """
         更新会话中最新一条用户消息的回复相关字段（用于重新生成时覆盖旧 bot_reply/history/model）
         """
@@ -394,6 +411,15 @@ class SupabaseMessageRepository:
                 payload["history"] = history
             if model_name is not None:
                 payload["model_name"] = model_name
+            if full_response is not None:
+                try:
+                    full_response_int = int(full_response)
+                    if full_response_int < 0:
+                        raise ValueError("full_response must be non-negative")
+                    payload["full_response"] = full_response_int
+                except Exception:
+                    self.logger.error(f"❌ full_response 必须为非负整数，当前值: {full_response}")
+                    return False
             if not payload:
                 return True
             client = self.supabase_manager.get_client()
