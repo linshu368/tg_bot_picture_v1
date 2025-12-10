@@ -7,20 +7,18 @@ class UIHandler:
     @staticmethod
     def build_reply_keyboard(session_id: str="", user_message_id: str="") -> InlineKeyboardMarkup:
         """生成消息下方的操作按钮（内联键盘）"""
-        # 情况1：没有 session_id，仅提供新对话
+        # 情况1：没有 session_id，暂不提供任何按钮（隐藏新对话入口）
         if not session_id:
             logging.warning(f"⚠️ callback_data 被禁用: session_id={session_id}, user_message_id={user_message_id}")
-            keyboard = [[InlineKeyboardButton("🆕 新的对话", callback_data="new_session")]]
-        # 情况2：有 session_id 但没有 user_message_id，仅显示新对话与保存
+            keyboard = []
+        # 情况2：有 session_id 但没有 user_message_id，暂时仅显示保存
         elif not user_message_id:
             keyboard = [[
-                InlineKeyboardButton("🆕 新的对话", callback_data=f"new_session:{session_id}"),
                 InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
             ]]
-        # 情况3：二者都有，仍只显示新对话与保存（暂时下线重新生成）
+        # 情况3：二者都有，仅显示保存（新对话入口下线）
         else:
             keyboard = [[
-                InlineKeyboardButton("🆕 新的对话", callback_data=f"new_session:{session_id}"),
                 InlineKeyboardButton("💾 保存对话", callback_data=f"save_snapshot:{session_id}")
             ]]
         return InlineKeyboardMarkup(keyboard)
