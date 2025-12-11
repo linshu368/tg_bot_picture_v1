@@ -23,13 +23,13 @@ class AICompletionPort:
         self.deepseek = deepseek_caller
         # 前3轮对话的增强指令模板
         self.early_conversation_instruction = (
-            "##用户信息:{user_context}\n"
+            "##用户输入:{user_context}\n"
             "##系统指令：以下为最高优先级指令。\n"
             "{system_instructions}"
         )
         # 第4轮及以后对话的持续指令模板
         self.ongoing_conversation_instruction = (
-            "##用户信息:{user_context}\n"
+            "##用户输入:{user_context}\n"
             "##持续指令：\n"
             "{ongoing_instructions}"
         )
@@ -43,12 +43,20 @@ class AICompletionPort:
             print("⚠️ GEMINI_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
             self.gemini_first_chunk_timeout = 3.0
 
-        ds_timeout_str = os.getenv("DEEPSEEK_FIRST_CHUNK_TIMEOUT")
+        ds_1_timeout_str = os.getenv("DEEPSEEK_1_FIRST_CHUNK_TIMEOUT")
         try:
-            self.deepseek_first_chunk_timeout = float(ds_timeout_str) if ds_timeout_str else 4.0
+            self.deepseek_first_chunk_timeout = float(ds_1_timeout_str) if ds_1_timeout_str else 4.0
         except (TypeError, ValueError):
-            print("⚠️ DEEPSEEK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 4 秒")
+            print("⚠️ DEEPSEEK_1_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 4 秒")
             self.deepseek_first_chunk_timeout = 4.0
+
+        # 新增 DEEPSEEK_2
+        ds_2_timeout_str = os.getenv("DEEPSEEK_2_FIRST_CHUNK_TIMEOUT")
+        try:
+            self.deepseek_2_first_chunk_timeout = float(ds_2_timeout_str) if ds_2_timeout_str else 4.0
+        except (TypeError, ValueError):
+            print("⚠️ DEEPSEEK_2_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 4 秒")
+            self.deepseek_2_first_chunk_timeout = 4.0
 
         grok_timeout_str = os.getenv("GROK_FIRST_CHUNK_TIMEOUT")
         try:
@@ -56,16 +64,6 @@ class AICompletionPort:
         except (TypeError, ValueError):
             print("⚠️ GROK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
             self.grok_first_chunk_timeout = 3.0
-
-        full_timeout_str = os.getenv("AI_FULL_RESPONSE_TIMEOUT")
-        try:
-            parsed_full_timeout = float(full_timeout_str) if full_timeout_str else 30.0
-            if parsed_full_timeout <= 0:
-                raise ValueError("AI_FULL_RESPONSE_TIMEOUT must be positive")
-            self.full_response_timeout = parsed_full_timeout
-        except (TypeError, ValueError):
-            print("⚠️ AI_FULL_RESPONSE_TIMEOUT 配置无效，使用默认值 30 秒")
-            self.full_response_timeout = 30.0
 
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
@@ -307,9 +305,9 @@ class AICompletionPort:
             str: 每个流式回复片段
         """
         full_sequence = [
-            ("DeepSeek", self.deepseek, "DEEPSEEK_MODEL"),
+            ("DeepSeek", self.deepseek, "DEEPSEEK_MODEL_1"),
+            ("DeepSeek_Retry", self.deepseek, "DEEPSEEK_MODEL_2"),
             ("Grok", self.grok, "GROK_MODEL"),
-            ("Novel", self.novel, "NOVEL_MODEL"),
         ]
         provider_sequence = [(name, caller, env_key) for name, caller, env_key in full_sequence if caller]
 
@@ -356,9 +354,6 @@ class AICompletionPort:
                 accumulated_chars_count = 0
                 metric_recorded = False
                 METRIC_CHAR_THRESHOLD = 5
-                full_response_timeout = self.full_response_timeout
-                response_deadline: Optional[float] = None
-                full_timeout_triggered = False
 
                 def _track_chunk_and_record_metric(chunk_text: str) -> None:
                     nonlocal accumulated_chars_count, metric_recorded
@@ -384,58 +379,29 @@ class AICompletionPort:
                         
                         metric_recorded = True
 
-                def _ensure_full_response_deadline_started() -> None:
-                    nonlocal response_deadline
-                    if full_response_timeout and response_deadline is None:
-                        response_deadline = time.time() + full_response_timeout
-
-                def _is_full_response_timeout_reached() -> bool:
-                    return response_deadline is not None and time.time() >= response_deadline
-
                 # 根据提供方设定首个chunk的超时时间
                 if provider == "Gemini":
                     first_chunk_timeout = self.gemini_first_chunk_timeout or 3.0
                 elif provider == "DeepSeek":
-                    first_chunk_timeout = self.deepseek_first_chunk_timeout or 4.0
+                    first_chunk_timeout = self.deepseek_first_chunk_timeout or 3.5
+                elif provider == "DeepSeek_Retry":
+                    first_chunk_timeout = self.deepseek_2_first_chunk_timeout or 2.0
                 elif provider == "Grok":
                     first_chunk_timeout = self.grok_first_chunk_timeout or 3.0
                 else:
                     # 其他提供方暂无强制首字超时限制
                     first_chunk_timeout = None
 
-                def _on_chunk_with_tracking(chunk_text: str) -> None:
-                    _ensure_full_response_deadline_started()
-                    _track_chunk_and_record_metric(chunk_text)
-
                 if first_chunk_timeout:
-                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _on_chunk_with_tracking, provider):
+                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _track_chunk_and_record_metric, provider):
                         yield chunk
-                        if _is_full_response_timeout_reached():
-                            full_timeout_triggered = True
-                            print(f"⏱️ 达到 AI 完整回复超时阈值（{full_response_timeout}s），提前结束输出")
-                            break
                 else:
                     # 无特殊首字超时限制的常规流式处理
                     async for chunk in stream:
-                        _ensure_full_response_deadline_started()
                         _track_chunk_and_record_metric(chunk)
                         yield chunk
-                        if _is_full_response_timeout_reached():
-                            full_timeout_triggered = True
-                            print(f"⏱️ 达到 AI 完整回复超时阈值（{full_response_timeout}s），提前结束输出")
-                            break
 
-                if full_timeout_triggered and hasattr(stream, "aclose"):
-                    try:
-                        await stream.aclose()
-                    except Exception as close_err:
-                        print(f"⚠️ 关闭流式生成器失败: {close_err}")
-
-                if full_timeout_triggered:
-                    print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）| 触发完整回复限时 {full_response_timeout}s")
-                else:
-                    print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
-
+                print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
                 # 🆕 结束标志：为了消除“消息未回完”的误解，统一添加结束符
                 yield "\n●"
                 return
