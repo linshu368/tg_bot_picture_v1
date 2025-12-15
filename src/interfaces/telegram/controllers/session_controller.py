@@ -246,7 +246,6 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
     try:
         # 使用流式生成并收集完整回复
         reply = ""
-        first_chunk_ts: Optional[float] = None
         used_instructions_meta: Dict[str, Any] = {}
         def _on_used_instructions(meta: Dict[str, Any]) -> None:
             try:
@@ -263,13 +262,7 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
             on_used_instructions=_on_used_instructions,
             apply_enhancement=True
         ):
-            if first_chunk_ts is None:
-                first_chunk_ts = time.time()
             reply += chunk
-
-        full_response_seconds: Optional[int] = None
-        if first_chunk_ts:
-            full_response_seconds = max(0, int(time.time() - first_chunk_ts))
             
         # 🆕 AI生成完成后，获取实际使用的指令并重新保存用户消息（带指令 + 100%复现的history）
         if message_service.message_repository:
@@ -316,8 +309,7 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
                             history=history_json_str,
                             model_name=model_name,
                             user_input=content,
-                            bot_reply=reply,
-                            full_response=full_response_seconds
+                            bot_reply=reply
                         )
                         logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}")
             except Exception as e:

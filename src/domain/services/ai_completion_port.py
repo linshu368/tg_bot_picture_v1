@@ -65,6 +65,23 @@ class AICompletionPort:
             print("⚠️ GROK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
             self.grok_first_chunk_timeout = 3.0
 
+        # AI流式生成 - 2. 中间卡顿熔断时长 (默认2.0秒)
+        inter_chunk_timeout_str = os.getenv("AI_STREAM_INTER_CHUNK_TIMEOUT")
+        try:
+            self.stream_inter_chunk_timeout = float(inter_chunk_timeout_str) if inter_chunk_timeout_str else 3.0
+        except (TypeError, ValueError):
+            print("⚠️ AI_STREAM_INTER_CHUNK_TIMEOUT 配置无效，使用默认值 3.0 秒")
+            self.stream_inter_chunk_timeout = 2.0
+
+        # AI流式生成 - 3. 总时长熔断 (默认15.0秒)
+        total_timeout_str = os.getenv("AI_STREAM_TOTAL_TIMEOUT")
+        try:
+            self.stream_total_timeout = float(total_timeout_str) if total_timeout_str else 15.0
+        except (TypeError, ValueError):
+            print("⚠️ AI_STREAM_TOTAL_TIMEOUT 配置无效，使用默认值 15.0 秒")
+            self.stream_total_timeout = 4.0
+
+
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
         """Return a logging-safe preview of text, avoiding Unicode surrogate errors.
@@ -260,29 +277,88 @@ class AICompletionPort:
         print(f"🤖 AI流式生成完成 | 耗时: {time.time() - start:.2f}秒 | 总chunk数: {chunk_count} | 总字符数: {total_chars}")
         print("🤖" + "="*48)
 
-    @staticmethod
-    async def _stream_with_initial_timeout(generator, timeout: float, on_chunk_received: Callable[[str], None], provider_name: str) -> AsyncGenerator[str, None]:
+    async def _stream_managed(self, generator: AsyncGenerator[str, None], first_chunk_timeout: float, inter_chunk_timeout: float = 5.0, total_timeout: float = 20.0, on_chunk_received: Callable[[str], None] = None, provider_name: str = "Unknown", on_duration_calculated: Callable[[float], None] = None) -> AsyncGenerator[str, None]:
         """
-        辅助方法：对异步生成器的首个chunk施加超时限制
+        全能流式包装器，实现三道防线超时控制：
+        1. 首响超时 (TTFT): 抛出异常 -> 触发重试
+        2. 中间卡顿: 停止生成 -> 视为成功
+        3. 总时长超时: 停止生成 -> 视为成功
         """
+        start_time = None
+        is_first_chunk = True
+        
         try:
-            first_chunk = await asyncio.wait_for(generator.__anext__(), timeout=timeout)
-        except asyncio.TimeoutError:
-            await generator.aclose()
-            raise TimeoutError(f"{provider_name} 首个chunk超时（超过{timeout}秒）")
-        except StopAsyncIteration:
-            await generator.aclose()
-            raise RuntimeError(f"{provider_name} 未返回任何内容")
-        except Exception:
-            await generator.aclose()
-            raise
+            # Stage 1: First Chunk Timeout
+            try:
+                first_chunk = await asyncio.wait_for(generator.__anext__(), timeout=first_chunk_timeout)
+                start_time = time.time()
+                if on_chunk_received:
+                    on_chunk_received(first_chunk)
+                yield first_chunk
+                is_first_chunk = False
+            except asyncio.TimeoutError:
+                # 第一道防线：首响超时 -> 抛出异常，让上层去重试
+                await generator.aclose()
+                raise TimeoutError(f"{provider_name} 首个chunk超时（超过{first_chunk_timeout}秒）")
+            except StopAsyncIteration:
+                await generator.aclose()
+                raise RuntimeError(f"{provider_name} 未返回任何内容")
+            
+            # Stage 2 & 3: Inter-Chunk & Total Timeout
+            while True:
+                # 计算剩余的总可用时间
+                elapsed = time.time() - start_time
+                remaining_total = total_timeout - elapsed
+                
+                if remaining_total <= 0:
+                    print(f"⏱️ {provider_name} 达到总时长熔断阈值 ({total_timeout}s)，停止生成")
+                    break # 第三道防线：总时长超时 -> 正常结束
+                
+                # 计算本次 wait 的时间：取 Inter-Chunk 和 Remaining-Total 的较小值
+                # 注意：Inter-Chunk 是为了防止单次生成卡死，Remaining-Total 是为了防止总时长过长
+                wait_time = min(inter_chunk_timeout, remaining_total)
+                
+                try:
+                    chunk = await asyncio.wait_for(generator.__anext__(), timeout=wait_time)
+                    if on_chunk_received:
+                        on_chunk_received(chunk)
+                    yield chunk
+                except asyncio.TimeoutError:
+                    # 判断是哪种超时
+                    if time.time() - start_time >= total_timeout:
+                         print(f"⏱️ {provider_name} 达到总时长熔断阈值 ({total_timeout}s)，停止生成")
+                         break # 第三道防线
+                    else:
+                         print(f"🐢 {provider_name} 中间生成卡顿（超过{inter_chunk_timeout}s），提前截断")
+                         break # 第二道防线：中间卡顿 -> 正常结束（截断）
+                except StopAsyncIteration:
+                    break # 正常结束
 
-        on_chunk_received(first_chunk)
-        yield first_chunk
-
-        async for chunk in generator:
-            on_chunk_received(chunk)
-            yield chunk
+        except Exception as e:
+            # 确保生成器被关闭
+            try:
+                await generator.aclose()
+            except:
+                pass
+            if isinstance(e, (TimeoutError, RuntimeError)) and is_first_chunk:
+                raise e # 首响相关的错误往上抛，触发重试
+            
+            # 其他错误（如网络中断），如果不是首响，也可以考虑截断而不是报错？
+            if is_first_chunk:
+                 raise e
+            else:
+                 print(f"⚠️ {provider_name} 生成过程中发生异常: {e}，视为截断")
+                 # 异常情况下，我们依然可以计算已消耗的时间
+                 pass
+        
+        finally:
+             # 在生成结束时，计算并回调实际时长
+             if start_time and on_duration_calculated:
+                 duration = time.time() - start_time
+                 try:
+                     on_duration_calculated(duration)
+                 except Exception as _e:
+                     print(f"⚠️ on_duration_calculated 回调执行失败: {_e}")
 
     async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
                                              max_retries=3, timeout=60, session_context_source=None,
@@ -389,19 +465,34 @@ class AICompletionPort:
                 elif provider == "Grok":
                     first_chunk_timeout = self.grok_first_chunk_timeout or 3.0
                 else:
-                    # 其他提供方暂无强制首字超时限制
-                    first_chunk_timeout = None
-
-                if first_chunk_timeout:
-                    async for chunk in self._stream_with_initial_timeout(stream, first_chunk_timeout, _track_chunk_and_record_metric, provider):
-                        yield chunk
-                else:
-                    # 无特殊首字超时限制的常规流式处理
-                    async for chunk in stream:
-                        _track_chunk_and_record_metric(chunk)
-                        yield chunk
+                    first_chunk_timeout = 4.0
+                
+                # 定义接收时长数据的回调
+                def _on_duration_calculated(duration: float):
+                    used_meta_candidate["full_response_latency"] = duration
+                    print(f"⏱️ 完整生成耗时: {duration:.2f}s")
+                
+                # 使用全能包装器 _stream_managed 代替原有的逻辑
+                async for chunk in self._stream_managed(
+                    generator=stream,
+                    first_chunk_timeout=first_chunk_timeout,
+                    inter_chunk_timeout=self.stream_inter_chunk_timeout,
+                    total_timeout=self.stream_total_timeout,
+                    on_chunk_received=_track_chunk_and_record_metric,
+                    provider_name=provider,
+                    on_duration_calculated=_on_duration_calculated
+                ):
+                    yield chunk
 
                 print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
+                
+                # 🆕 结束标志前，再次回调以透传最终时长
+                if on_used_instructions and used_meta_candidate:
+                    try:
+                        on_used_instructions(dict(used_meta_candidate))
+                    except Exception as _e:
+                        print(f"⚠️ on_used_instructions (final) 回调执行失败: {_e}")
+                
                 # 🆕 结束标志：为了消除“消息未回完”的误解，统一添加结束符
                 yield "\n●"
                 return

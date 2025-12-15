@@ -112,32 +112,67 @@ class AsyncDeepseekCaller:
                     total_time = time.time() - request_start
                     print(f"[API] 总耗时: {total_time:.3f}秒, 共{chunk_count}个chunk")
 
-    async def get_response(self, messages, model=None, timeout=60):
-        """
-        非流式版本 - 获取完整响应
-        """
-        if not self.api_key:
-            raise ValueError("API密钥未设置，请设置DEEPSEEK_API_KEY环境变量")
+    # async def get_response(self, messages, model=None, timeout=60):
+    #     """
+    #     非流式版本 - 获取完整响应
+    #     """
+    #     if not self.api_key:
+    #         raise ValueError("API密钥未设置，请设置DEEPSEEK_API_KEY环境变量")
         
-        use_model = model or os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
+    #     use_model = model or os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
         
-        data = {
-            'messages': messages,
-            'stream': False,
-            'model': use_model,
-            'temperature': 0.3
-        }
+    #     data = {
+    #         'messages': messages,
+    #         'stream': False,
+    #         'model': use_model,
+    #         'temperature': 0.3
+    #     }
 
-        timeout_config = aiohttp.ClientTimeout(total=timeout)
+    #     timeout_config = aiohttp.ClientTimeout(total=timeout)
         
-        async with aiohttp.ClientSession(timeout=timeout_config) as session:
-            async with session.post(self.url, headers=self.headers, json=data) as response:
-                response.raise_for_status()
-                result = await response.json()
+    #     async with aiohttp.ClientSession(timeout=timeout_config) as session:
+    #         async with session.post(self.url, headers=self.headers, json=data) as response:
+    #             response.raise_for_status()
+    #             result = await response.json()
                 
-                choices = result.get('choices', [])
-                if not choices:
-                    raise ValueError("API响应中没有choices")
+    #             choices = result.get('choices', [])
+    #             if not choices:
+    #                 raise ValueError("API响应中没有choices")
                 
-                return choices[0].get('message', {}).get('content', '')
+    #             return choices[0].get('message', {}).get('content', '')
 
+
+if __name__ == "__main__":
+    async def test_main():
+        import time
+        print("="*50)
+        print("DeepSeek Async Stream Test")
+        print("="*50)
+        
+        caller = AsyncDeepseekCaller()
+        # 在这里硬编码指定要调试的模型，例如 "deepseek-chat" 或 "deepseek-reasoner"
+        test_model = "deepseek/deepseek-chat-v3.1" 
+        messages = [{"role": "user", "content": "你是小说创作家，写一个400字的都市题材故事"}]
+        
+        try:
+            print(f"Prompt: {messages[0]['content']}")
+            print(f"Testing Model: {test_model}")
+            start_time = time.time()
+            last_time = start_time
+            
+            async for chunk in caller.get_stream_response(messages, model=test_model, debug=True):
+                now = time.time()
+                total_elapsed = now - start_time
+                chunk_elapsed = now - last_time
+                # 打印 chunk 内容和时间
+                # 注意: 为了显示清晰，我们将换行符替换为 \\n
+                clean_chunk = chunk.replace('\n', '\\n')
+                print(f"[Chunk +{chunk_elapsed:.3f}s | Total {total_elapsed:.3f}s]: {clean_chunk}")
+                last_time = now
+                
+        except Exception as e:
+            print(f"\n[ERROR] 发生异常: {e}")
+            import traceback
+            traceback.print_exc()
+
+    asyncio.run(test_main())

@@ -175,8 +175,6 @@ class StreamMessageService:
         accumulated_text_ref = [accumulated_text]
         phase_ref = [phase]
         last_update_time_ref = [last_update_time]
-        first_chunk_timestamp_ref = [None]  # 首个chunk到达时间戳
-        full_response_seconds: Optional[int] = None
         
         try:
             # 使用带重试机制的流式生成
@@ -207,14 +205,11 @@ class StreamMessageService:
                     regular_update_interval=regular_update_interval,
                     last_update_time_ref=last_update_time_ref,
                     initial_msg=initial_msg,
-                    start_time=start_time,
-                    first_chunk_timestamp_ref=first_chunk_timestamp_ref
+                    start_time=start_time
                 )
             
             # 从引用中获取最终值
             accumulated_text = accumulated_text_ref[0]
-            if first_chunk_timestamp_ref[0]:
-                full_response_seconds = max(0, int(time.time() - first_chunk_timestamp_ref[0]))
             
             # 阶段3：立即最终更新
             if accumulated_text:
@@ -284,6 +279,9 @@ class StreamMessageService:
                         except Exception:
                             round_num = None
                         
+                        # 🆕 新字段写入逻辑：完整响应耗时
+                        full_response_latency = used_instructions_meta.get("full_response_latency")
+                        
                         if system_instructions or ongoing_instructions:
                             # 获取session_id中的user_id和role_id
                             try:
@@ -305,9 +303,9 @@ class StreamMessageService:
                                             model_name=model_name,
                                             user_input=content,
                                             round=round_num,
-                                            full_response=full_response_seconds
+                                            full_response_latency=full_response_latency
                                         )
-                                        self.logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}")
+                                        self.logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}, duration={full_response_latency}")
                             except Exception as inner_e:
                                 self.logger.error(f"❌ 获取会话信息失败: {inner_e}")
                     except Exception as e:
@@ -334,8 +332,7 @@ class StreamMessageService:
 
     async def _process_chunk_with_granular_control(self, chunk, accumulated_text_ref, phase_ref, 
                                                  first_chars_threshold, regular_update_interval, 
-                                                 last_update_time_ref, initial_msg, start_time=None,
-                                                 first_chunk_timestamp_ref=None):
+                                                 last_update_time_ref, initial_msg, start_time=None):
         """
         对大块进行字符级分割处理，实现精细化控制
         
@@ -357,8 +354,6 @@ class StreamMessageService:
             accumulated_text += char
             char_count = len(accumulated_text)
             current_time = time.time()
-            if first_chunk_timestamp_ref is not None and first_chunk_timestamp_ref[0] is None:
-                first_chunk_timestamp_ref[0] = current_time
             
             if phase == "collecting_first_chars":
                 # 阶段1：收集前N个字符后立即更新
