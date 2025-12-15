@@ -45,18 +45,18 @@ class AICompletionPort:
 
         ds_1_timeout_str = os.getenv("DEEPSEEK_1_FIRST_CHUNK_TIMEOUT")
         try:
-            self.deepseek_first_chunk_timeout = float(ds_1_timeout_str) if ds_1_timeout_str else 4.0
+            self.deepseek_first_chunk_timeout = float(ds_1_timeout_str) if ds_1_timeout_str else 3.0
         except (TypeError, ValueError):
-            print("⚠️ DEEPSEEK_1_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 4 秒")
-            self.deepseek_first_chunk_timeout = 4.0
+            print("⚠️ DEEPSEEK_1_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
+            self.deepseek_first_chunk_timeout = 3.0
 
         # 新增 DEEPSEEK_2
         ds_2_timeout_str = os.getenv("DEEPSEEK_2_FIRST_CHUNK_TIMEOUT")
         try:
-            self.deepseek_2_first_chunk_timeout = float(ds_2_timeout_str) if ds_2_timeout_str else 4.0
+            self.deepseek_2_first_chunk_timeout = float(ds_2_timeout_str) if ds_2_timeout_str else 3.0
         except (TypeError, ValueError):
-            print("⚠️ DEEPSEEK_2_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 4 秒")
-            self.deepseek_2_first_chunk_timeout = 4.0
+            print("⚠️ DEEPSEEK_2_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
+            self.deepseek_2_first_chunk_timeout = 3.0
 
         grok_timeout_str = os.getenv("GROK_FIRST_CHUNK_TIMEOUT")
         try:
@@ -65,13 +65,13 @@ class AICompletionPort:
             print("⚠️ GROK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
             self.grok_first_chunk_timeout = 3.0
 
-        # AI流式生成 - 2. 中间卡顿熔断时长 (默认2.0秒)
+        # AI流式生成 - 2. 中间卡顿熔断时长 (默认3.0秒)
         inter_chunk_timeout_str = os.getenv("AI_STREAM_INTER_CHUNK_TIMEOUT")
         try:
             self.stream_inter_chunk_timeout = float(inter_chunk_timeout_str) if inter_chunk_timeout_str else 3.0
         except (TypeError, ValueError):
             print("⚠️ AI_STREAM_INTER_CHUNK_TIMEOUT 配置无效，使用默认值 3.0 秒")
-            self.stream_inter_chunk_timeout = 2.0
+            self.stream_inter_chunk_timeout = 3.0
 
         # AI流式生成 - 3. 总时长熔断 (默认15.0秒)
         total_timeout_str = os.getenv("AI_STREAM_TOTAL_TIMEOUT")
@@ -79,7 +79,7 @@ class AICompletionPort:
             self.stream_total_timeout = float(total_timeout_str) if total_timeout_str else 15.0
         except (TypeError, ValueError):
             print("⚠️ AI_STREAM_TOTAL_TIMEOUT 配置无效，使用默认值 15.0 秒")
-            self.stream_total_timeout = 4.0
+            self.stream_total_timeout = 15.0
 
 
 
