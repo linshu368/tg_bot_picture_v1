@@ -112,35 +112,6 @@ class AsyncDeepseekCaller:
                     total_time = time.time() - request_start
                     print(f"[API] 总耗时: {total_time:.3f}秒, 共{chunk_count}个chunk")
 
-    # async def get_response(self, messages, model=None, timeout=60):
-    #     """
-    #     非流式版本 - 获取完整响应
-    #     """
-    #     if not self.api_key:
-    #         raise ValueError("API密钥未设置，请设置DEEPSEEK_API_KEY环境变量")
-        
-    #     use_model = model or os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
-        
-    #     data = {
-    #         'messages': messages,
-    #         'stream': False,
-    #         'model': use_model,
-    #         'temperature': 0.3
-    #     }
-
-    #     timeout_config = aiohttp.ClientTimeout(total=timeout)
-        
-    #     async with aiohttp.ClientSession(timeout=timeout_config) as session:
-    #         async with session.post(self.url, headers=self.headers, json=data) as response:
-    #             response.raise_for_status()
-    #             result = await response.json()
-                
-    #             choices = result.get('choices', [])
-    #             if not choices:
-    #                 raise ValueError("API响应中没有choices")
-                
-    #             return choices[0].get('message', {}).get('content', '')
-
 
 if __name__ == "__main__":
     async def test_main():

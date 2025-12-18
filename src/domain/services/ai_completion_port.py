@@ -4,7 +4,8 @@ import random
 import os
 import copy
 import asyncio
-from typing import Optional, Callable, AsyncGenerator, Dict, Any
+from typing import Optional, Callable, AsyncGenerator, Dict, Any, List
+from dataclasses import dataclass
 from demo.grok_async import AsyncGrokCaller
 from demo.novel_async import AsyncNovelCaller
 from demo.gemini_async import AsyncGeminiCaller
@@ -15,6 +16,15 @@ from src.infrastructure.monitoring.metrics import (
     AI_FIRST_TOKEN_LATENCY
 )
 
+@dataclass
+class CallProfile:
+    """定义单次AI调用的配置规格"""
+    caller_attr: str       # 对应 self 中的实例属性名，如 'deepseek'
+    model_env_key: str     # 模型名称的环境变量 Key
+    timeout_env_key: str   # 首字超时时间的环境变量 Key
+    provider_name: str     # 用于日志和监控显示的名称
+    default_timeout: float = 3.0 # 默认超时时间
+
 class AICompletionPort:
     def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None, gemini_caller: Optional[AsyncGeminiCaller] = None, deepseek_caller: Optional[AsyncDeepseekCaller] = None):
         self.grok = grok_caller
@@ -23,47 +33,78 @@ class AICompletionPort:
         self.deepseek = deepseek_caller
         # 前3轮对话的增强指令模板
         self.early_conversation_instruction = (
-            "##用户指令:{user_context}\n"
             "##系统指令：以下为最高优先级指令。\n"
             "{system_instructions}"
+            "##用户指令:{user_context}\n"
         )
         # 第4轮及以后对话的持续指令模板
         self.ongoing_conversation_instruction = (
-            "#用户指令:{user_context}\n"
             "##系统指令：\n"
             "{ongoing_instructions}"
+            "#用户指令:{user_context}\n"
         )
         # 取消实例级共享状态，改为通过回调向调用方传递本次使用的指令信息
         # self.last_used_instructions 已移除
 
-        timeout_str = os.getenv("GEMINI_FIRST_CHUNK_TIMEOUT")
-        try:
-            self.gemini_first_chunk_timeout = float(timeout_str) if timeout_str else 3.0
-        except (TypeError, ValueError):
-            print("⚠️ GEMINI_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
-            self.gemini_first_chunk_timeout = 3.0
+        # -------------------------------------------------------------------------
+        # 1. 原子能力库 (Profiles): 定义所有可用的原子调用方式
+        # -------------------------------------------------------------------------
+        self.profiles = {
+            # --- DeepSeek 策略 ---
+            "deepseek_v1": CallProfile(
+                caller_attr="deepseek",
+                model_env_key="DEEPSEEK_MODEL_1",
+                timeout_env_key="DEEPSEEK_1_FIRST_CHUNK_TIMEOUT",
+                provider_name="DeepSeek_V1",
+                default_timeout=3
+            ),
+            "deepseek_v2": CallProfile(
+                caller_attr="deepseek",
+                model_env_key="DEEPSEEK_MODEL_2",
+                timeout_env_key="DEEPSEEK_2_FIRST_CHUNK_TIMEOUT",
+                provider_name="DeepSeek_V2",
+                default_timeout=2.5
+            ),
+            
+            # --- Gemini 策略 ---
+            "gemini_v1": CallProfile(
+                caller_attr="gemini",
+                model_env_key="GEMINI_MODEL", 
+                timeout_env_key="GEMINI_1_FIRST_CHUNK_TIMEOUT",
+                provider_name="Gemini_V1",
+                default_timeout=3.5
+            ),
+            "gemini_v2": CallProfile(
+                caller_attr="gemini",
+                model_env_key="GEMINI_MODEL", 
+                timeout_env_key="GEMINI_2_FIRST_CHUNK_TIMEOUT",
+                provider_name="Gemini_V2",
+                default_timeout=3
+            ),
 
-        ds_1_timeout_str = os.getenv("DEEPSEEK_1_FIRST_CHUNK_TIMEOUT")
-        try:
-            self.deepseek_first_chunk_timeout = float(ds_1_timeout_str) if ds_1_timeout_str else 3.0
-        except (TypeError, ValueError):
-            print("⚠️ DEEPSEEK_1_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
-            self.deepseek_first_chunk_timeout = 3.0
+            # --- Grok 策略 ---
+            "grok_v1": CallProfile(
+                caller_attr="grok",
+                model_env_key="GROK_MODEL",
+                timeout_env_key="GROK_FIRST_CHUNK_TIMEOUT",
+                provider_name="Grok",
+                default_timeout=3.0
+            ),
+        }
 
-        # 新增 DEEPSEEK_2
-        ds_2_timeout_str = os.getenv("DEEPSEEK_2_FIRST_CHUNK_TIMEOUT")
-        try:
-            self.deepseek_2_first_chunk_timeout = float(ds_2_timeout_str) if ds_2_timeout_str else 3.0
-        except (TypeError, ValueError):
-            print("⚠️ DEEPSEEK_2_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
-            self.deepseek_2_first_chunk_timeout = 3.0
-
-        grok_timeout_str = os.getenv("GROK_FIRST_CHUNK_TIMEOUT")
-        try:
-            self.grok_first_chunk_timeout = float(grok_timeout_str) if grok_timeout_str else 3.0
-        except (TypeError, ValueError):
-            print("⚠️ GROK_FIRST_CHUNK_TIMEOUT 配置无效，使用默认值 3 秒")
-            self.grok_first_chunk_timeout = 3.0
+        # -------------------------------------------------------------------------
+        # 2. 策略路由表 (Strategy Map): 定义不同模式下的调用链顺序
+        # -------------------------------------------------------------------------
+        self.strategies = {
+            # fast: Grok -> Gemini -> Grok
+            "fast": ["grok_v1", "gemini_v1", "grok_v1"],
+            
+            # story: Gemini (fast) -> Gemini (retry with longer timeout) -> Grok
+            "story": ["gemini_v1", "gemini_v2", "grok_v1"],
+            
+            # immersive: Gemini -> Gemini -> Grok
+            "immersive": ["deepseek_v1", "deepseek_v2", "grok_v1"]
+        }
 
         # AI流式生成 - 2. 中间卡顿熔断时长 (默认3.0秒)
         inter_chunk_timeout_str = os.getenv("AI_STREAM_INTER_CHUNK_TIMEOUT")
@@ -383,28 +424,44 @@ class AICompletionPort:
         Yields:
             str: 每个流式回复片段
         """
-        full_sequence = [
-            ("DeepSeek", self.deepseek, "DEEPSEEK_MODEL_1"),
-            ("DeepSeek_Retry", self.deepseek, "DEEPSEEK_MODEL_2"),
-            ("Grok", self.grok, "GROK_MODEL"),
-        ]
-        provider_sequence = [(name, caller, env_key) for name, caller, env_key in full_sequence if caller]
+        # 1. 获取当前模式对应的策略链
+        # 默认兜底使用 immersive 策略
+        strategy_keys = self.strategies.get(model_mode, self.strategies["immersive"])
+        
+        # 2. 转换为具体的配置对象列表（仅包含有效的配置）
+        execution_plan = [self.profiles[key] for key in strategy_keys if key in self.profiles]
 
-        if not provider_sequence:
-            raise RuntimeError("未配置任何可用的AI调用器")
+        if not execution_plan:
+             raise RuntimeError(f"策略 '{model_mode}' 未定义任何有效的执行计划")
 
-        total_attempts = min(max_retries, len(provider_sequence))
+        # 限制重试次数不超过计划长度
+        total_attempts = min(max_retries, len(execution_plan))
 
         for attempt in range(total_attempts):
-            provider, caller, model_env_key = provider_sequence[attempt]
-            model_env = os.getenv(model_env_key)
+            profile = execution_plan[attempt]
+            
+            # 动态获取 caller 实例
+            caller = getattr(self, profile.caller_attr, None)
+            if not caller:
+                print(f"⚠️ 调用器 '{profile.caller_attr}' 未初始化，跳过此步骤")
+                continue
+
+            # 动态获取环境变量配置
+            model_env = os.getenv(profile.model_env_key)
+            timeout_env_val = os.getenv(profile.timeout_env_key)
+            try:
+                first_chunk_timeout = float(timeout_env_val) if timeout_env_val else profile.default_timeout
+            except ValueError:
+                first_chunk_timeout = profile.default_timeout
+
+            provider_display_name = profile.provider_name
 
             try:
                 print(f"🔄 AI生成尝试 #{attempt + 1}/{total_attempts}")
-                print(f"🚀 本次尝试使用提供方: {provider} | 模型: {model_env} | 模式: {model_mode}")
+                print(f"🚀 本次尝试使用提供方: {provider_display_name} | 模型: {model_env} | 模式: {model_mode} | 首字超时: {first_chunk_timeout}s")
 
                 # 📊 T0: 记录 AI 调用次数
-                AI_PROVIDER_CALLS_TOTAL.labels(provider=provider, model=model_env or "unknown").inc()
+                AI_PROVIDER_CALLS_TOTAL.labels(provider=provider_display_name, model=model_env or "unknown").inc()
                 
                 # ⏱️ T1: 记录 AI 请求发起时间
                 ai_req_start = time.time()
@@ -414,7 +471,7 @@ class AICompletionPort:
                 def _capture_used_instructions(meta: Dict[str, Any]) -> None:
                     used_meta_candidate.clear()
                     used_meta_candidate.update(meta or {})
-                    used_meta_candidate["provider"] = provider
+                    used_meta_candidate["provider"] = provider_display_name
                     used_meta_candidate["model"] = model_env
 
                 stream = self.generate_reply_stream(
@@ -448,7 +505,7 @@ class AICompletionPort:
                     if accumulated_chars_count >= METRIC_CHAR_THRESHOLD:
                         # ⏱️ T1: 记录 AI "首响"(前5字符)耗时
                         latency = time.time() - ai_req_start
-                        AI_FIRST_TOKEN_LATENCY.labels(provider=provider, model=model_env or "unknown").observe(latency)
+                        AI_FIRST_TOKEN_LATENCY.labels(provider=provider_display_name, model=model_env or "unknown").observe(latency)
                         
                         # 触发指令元数据回调（在首响达成时触发一次即可）
                         if on_used_instructions and used_meta_candidate:
@@ -458,18 +515,6 @@ class AICompletionPort:
                                 print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
                         
                         metric_recorded = True
-
-                # 根据提供方设定首个chunk的超时时间
-                if provider == "Gemini":
-                    first_chunk_timeout = self.gemini_first_chunk_timeout or 3.0
-                elif provider == "DeepSeek":
-                    first_chunk_timeout = self.deepseek_first_chunk_timeout or 3.5
-                elif provider == "DeepSeek_Retry":
-                    first_chunk_timeout = self.deepseek_2_first_chunk_timeout or 2.0
-                elif provider == "Grok":
-                    first_chunk_timeout = self.grok_first_chunk_timeout or 3.0
-                else:
-                    first_chunk_timeout = 4.0
                 
                 # 定义接收时长数据的回调
                 def _on_duration_calculated(duration: float):
@@ -483,12 +528,12 @@ class AICompletionPort:
                     inter_chunk_timeout=self.stream_inter_chunk_timeout,
                     total_timeout=self.stream_total_timeout,
                     on_chunk_received=_track_chunk_and_record_metric,
-                    provider_name=provider,
+                    provider_name=provider_display_name,
                     on_duration_calculated=_on_duration_calculated
                 ):
                     yield chunk
 
-                print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider}）")
+                print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider_display_name}）")
                 
                 # 🆕 结束标志前，再次回调以透传最终时长
                 if on_used_instructions and used_meta_candidate:
@@ -503,7 +548,7 @@ class AICompletionPort:
 
             except Exception as e:
                 # 🔴 T0: 记录 AI 调用失败
-                AI_PROVIDER_CALLS_FAILED_TOTAL.labels(provider=provider, error_type=type(e).__name__).inc()
+                AI_PROVIDER_CALLS_FAILED_TOTAL.labels(provider=provider_display_name, error_type=type(e).__name__).inc()
                 
                 print(f"❌ AI生成失败（第{attempt + 1}次尝试）: {e}")
 

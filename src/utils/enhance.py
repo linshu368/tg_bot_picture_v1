@@ -13,9 +13,9 @@ def enhance_user_input(original_content: str, instruction_type: str, user_contex
     
     if instruction_type == "system":
         template = (
-            "##用户信息:{user_context}\n"
             "##系统指令：以下为最高优先级指令。\n"
             "{system_instructions}"
+            "##用户指令:{user_context}\n"
         )
         instructions = os.getenv('SYSTEM_INSTRUCTIONS', '') or ''
         enhanced_content = template.format(
@@ -25,9 +25,10 @@ def enhance_user_input(original_content: str, instruction_type: str, user_contex
         return enhanced_content, (instructions or None)
     elif instruction_type == "ongoing":
         template = (
-            "##用户信息:{user_context}\n"
-            "##持续指令：\n"
+
+            "##系统指令：\n"
             "{ongoing_instructions}"
+            "##用户指令:{user_context}\n"
         )
         instructions = os.getenv('ONGOING_INSTRUCTIONS', '') or ''
         enhanced_content = template.format(
