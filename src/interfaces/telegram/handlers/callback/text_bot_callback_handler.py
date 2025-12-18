@@ -1,4 +1,5 @@
 import logging
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 import uuid
 from telegram.ext import ContextTypes
@@ -548,13 +549,13 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             current_mode = await self.session_service.redis_store.get_user_model_mode(user_id)
         
         if current_mode == "story":
-            mode_text = "📖 剧情模式"
+            mode_text = "📖 中级模型A"
         elif current_mode == "fast":
-            mode_text = "🍔 快餐模式"
+            mode_text = "🍔 基础模型"
         else:
-            mode_text = "🎦 沉浸模式 (默认)"
+            mode_text = "🎦 中级模型B (默认)"
         
-        text = f"⚙️ **设置中心**\n\n当前模型模式：**{mode_text}**"
+        text = f"⚙️ **设置中心**\n\n当前模型：**{mode_text}**"
         
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🤖 模型选择", callback_data="settings_model_select")],
@@ -572,16 +573,18 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         if self.session_service and self.session_service.redis_store:
             current_mode = await self.session_service.redis_store.get_user_model_mode(user_id)
             
-        text = """🤖 **请选择 AI 回复模式**
+        # 暂时留空，等待用户填入频道消息链接
+        model_desc_link = os.getenv("MODEL_DESC_LINK", "")
 
-🎦 **沉浸模式**：平衡性能与深度，适合大多数场景，默认推荐。
-🍔 **快餐模式**：响应速度快，适合闲聊，消耗基础积分。
-📖 **剧情模式**：描写细腻，逻辑性强，适合角色扮演，消耗高级积分。"""
+        text = (
+            f"<a href=\"{model_desc_link}\">&#8203;</a>"
+            "请选择要切换的模型"
+        )
 
         # 构建按钮，当前选中的加 ✅
-        btn_immersive = "🎦 沉浸模式" + (" ✅" if current_mode == "immersive" else "")
-        btn_fast = "🍔 快餐模式" + (" ✅" if current_mode == "fast" else "")
-        btn_story = "📖 剧情模式" + (" ✅" if current_mode == "story" else "")
+        btn_immersive = "🎦 中级模型B" + (" ✅" if current_mode == "immersive" else "")
+        btn_fast = "🍔 基础模型" + (" ✅" if current_mode == "fast" else "")
+        btn_story = "📖 中级模型A" + (" ✅" if current_mode == "story" else "")
 
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(btn_immersive, callback_data="set_mode:immersive")],
@@ -590,7 +593,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             [InlineKeyboardButton("🔙 返回", callback_data="settings_main")]
         ])
         
-        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=False)
 
     @robust_callback_handler
     async def _on_set_mode(self, query, context: ContextTypes.DEFAULT_TYPE):
@@ -604,11 +607,11 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             await self.session_service.redis_store.set_user_model_mode(user_id, mode)
             
         if mode == "fast":
-            mode_text = "快餐模式"
+            mode_text = "基础模型"
         elif mode == "story":
-            mode_text = "剧情模式"
+            mode_text = "中级模型A"
         else:
-            mode_text = "沉浸模式"
+            mode_text = "中级模型B"
         
         await query.answer(f"✅ 已切换为：{mode_text}")
         

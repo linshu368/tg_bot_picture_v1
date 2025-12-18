@@ -519,13 +519,13 @@ class TextBot:
         if self.session_service and self.session_service.redis_store:
             current_mode = await self.session_service.redis_store.get_user_model_mode(user_id)
         
-        mode_text = "🎦 沉浸模式 (默认)"
+        mode_text = "🎦 中级模型B"
         if current_mode == "fast":
-            mode_text = "🍔 快餐模式"
+            mode_text = "🍔 基础模型"
         elif current_mode == "story":
-            mode_text = "📖 剧情模式"
+            mode_text = "📖 中级模型A"
             
-        text = f"⚙️ **设置中心**\n\n当前模型模式：**{mode_text}**"
+        text = f"⚙️ **设置中心**\n\n当前模型：**{mode_text}**"
         
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🤖 模型选择", callback_data="settings_model_select")],
