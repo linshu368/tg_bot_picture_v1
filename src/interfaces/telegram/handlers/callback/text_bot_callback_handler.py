@@ -33,6 +33,10 @@ class TextBotCallbackHandler(BaseCallbackHandler):
             "save_snapshot_direct": self._on_save_snapshot_direct,
             "delete_snapshot": self._on_delete_snapshot,
             "open_snapshot": self._on_open_snapshot,
+            "settings_main": self._on_settings_main,
+            "settings_model_select": self._on_settings_model_select,
+            "set_mode": self._on_set_mode,
+            "close_settings": self._on_close_settings,
         }
         self.logger.info(f"✅ 注册回调 handlers: {list(handlers.keys())}")
         return handlers
@@ -145,7 +149,8 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 session_id=session_id,
                 user_message_id=user_message_id,
                 user_input=user_input,
-                context_source=context_source
+                context_source=context_source,
+                user_id=user_id
             )
             
         except Exception as e:
@@ -156,7 +161,7 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 pass
 
     async def _execute_regenerate_stream_reply(self, initial_msg, role_data, session_id, 
-                                             user_message_id, user_input, context_source):
+                                             user_message_id, user_input, context_source, user_id=None):
         """
         执行重新生成专用的流式处理
         复用StreamMessageService的核心逻辑
@@ -165,6 +170,15 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         
         # 获取历史记录（已截断）- 使用实例的message_service
         history = await self.message_service.get_history(session_id)
+        
+        # 获取用户模型偏好
+        model_mode = "immersive"
+        if user_id:
+             try:
+                if self.session_service and self.session_service.redis_store:
+                    model_mode = await self.session_service.redis_store.get_user_model_mode(user_id)
+             except Exception as e:
+                self.logger.debug(f"获取用户模型偏好失败(regenerate): {e}")
         
         # 流式控制参数（与StreamMessageService保持一致）
         accumulated_text = ""
@@ -200,7 +214,8 @@ class TextBotCallbackHandler(BaseCallbackHandler):
                 user_input=user_input,
                 session_context_source=context_source,
                 on_used_instructions=_on_used_instructions,
-                apply_enhancement=True
+                apply_enhancement=True,
+                model_mode=model_mode
             ):
                 # 对大块进行字符级分割处理（复用StreamMessageService的逻辑）
                 await self._process_chunk_with_granular_control(
@@ -519,3 +534,88 @@ class TextBotCallbackHandler(BaseCallbackHandler):
         except Exception as e:
             self.logger.error(f"❌ 打开快照失败: {e}")
             await self._update_message(query, "❌ 创建新对话失败，请重试", session_id="", user_message_id="")
+
+    # -------------------------
+    # 设置相关回调
+    # -------------------------
+    @robust_callback_handler
+    async def _on_settings_main(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """设置主菜单"""
+        user_id = str(query.from_user.id)
+        # 获取当前模式
+        current_mode = "immersive"
+        if self.session_service and self.session_service.redis_store:
+            current_mode = await self.session_service.redis_store.get_user_model_mode(user_id)
+        
+        if current_mode == "story":
+            mode_text = "📖 剧情模式"
+        elif current_mode == "fast":
+            mode_text = "🍔 快餐模式"
+        else:
+            mode_text = "🎦 沉浸模式 (默认)"
+        
+        text = f"⚙️ **设置中心**\n\n当前模型模式：**{mode_text}**"
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🤖 模型选择", callback_data="settings_model_select")],
+            [InlineKeyboardButton("关闭设置", callback_data="close_settings")]
+        ])
+        
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+
+    @robust_callback_handler
+    async def _on_settings_model_select(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """模型选择菜单"""
+        user_id = str(query.from_user.id)
+        # 获取当前模式用于标记
+        current_mode = "story"
+        if self.session_service and self.session_service.redis_store:
+            current_mode = await self.session_service.redis_store.get_user_model_mode(user_id)
+            
+        text = """🤖 **请选择 AI 回复模式**
+
+🎦 **沉浸模式**：平衡性能与深度，适合大多数场景，默认推荐。
+🍔 **快餐模式**：响应速度快，适合闲聊，消耗基础积分。
+📖 **剧情模式**：描写细腻，逻辑性强，适合角色扮演，消耗高级积分。"""
+
+        # 构建按钮，当前选中的加 ✅
+        btn_immersive = "🎦 沉浸模式" + (" ✅" if current_mode == "immersive" else "")
+        btn_fast = "🍔 快餐模式" + (" ✅" if current_mode == "fast" else "")
+        btn_story = "📖 剧情模式" + (" ✅" if current_mode == "story" else "")
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(btn_immersive, callback_data="set_mode:immersive")],
+            [InlineKeyboardButton(btn_fast, callback_data="set_mode:fast")],
+            [InlineKeyboardButton(btn_story, callback_data="set_mode:story")],
+            [InlineKeyboardButton("🔙 返回", callback_data="settings_main")]
+        ])
+        
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode='Markdown')
+
+    @robust_callback_handler
+    async def _on_set_mode(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """设置模式"""
+        user_id = str(query.from_user.id)
+        raw_data = query.data
+        parts = raw_data.split(":")
+        mode = parts[1] if len(parts) > 1 else "immersive"
+        
+        if self.session_service and self.session_service.redis_store:
+            await self.session_service.redis_store.set_user_model_mode(user_id, mode)
+            
+        if mode == "fast":
+            mode_text = "快餐模式"
+        elif mode == "story":
+            mode_text = "剧情模式"
+        else:
+            mode_text = "沉浸模式"
+        
+        await query.answer(f"✅ 已切换为：{mode_text}")
+        
+        # 刷新界面
+        await self._on_settings_main(query, context)
+
+    @robust_callback_handler
+    async def _on_close_settings(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """关闭设置"""
+        await query.message.delete()

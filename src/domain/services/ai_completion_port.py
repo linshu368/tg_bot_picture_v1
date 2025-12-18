@@ -23,14 +23,14 @@ class AICompletionPort:
         self.deepseek = deepseek_caller
         # 前3轮对话的增强指令模板
         self.early_conversation_instruction = (
-            "##用户输入:{user_context}\n"
+            "##用户指令:{user_context}\n"
             "##系统指令：以下为最高优先级指令。\n"
             "{system_instructions}"
         )
         # 第4轮及以后对话的持续指令模板
         self.ongoing_conversation_instruction = (
-            "##用户输入:{user_context}\n"
-            "##持续指令：\n"
+            "#用户指令:{user_context}\n"
+            "##系统指令：\n"
             "{ongoing_instructions}"
         )
         # 取消实例级共享状态，改为通过回调向调用方传递本次使用的指令信息
@@ -139,24 +139,25 @@ class AICompletionPort:
         print(f"✨ 用户消息已增强({instruction_type}) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
         return enhanced_content, instructions if instructions else None
 
-    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None, on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None, apply_enhancement: bool = False) -> AsyncGenerator[str, None]:
+    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None, on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None, apply_enhancement: bool = False, model_mode: str = "immersive") -> AsyncGenerator[str, None]:
         """
         流式生成AI回复 - 返回异步生成器，用于Telegram Bot的流式更新
         
         Args:
             role_data: 角色配置数据
             history: 会话历史消息
-            user_input: 当前用户输入
+            user_input: 当前用户指令
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
             on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅调用一次）
             apply_enhancement: 是否在本方法中对最后一条用户消息做指令增强（默认 False）
+            model_mode: 模型等级/模式（immersive/story/fast）
             
         Yields:
             str: 每个流式回复片段
         """
         # 打印输入的历史记录
-        print(f"🧠 AI流式生成回复 | 输入历史记录数量: {len(history)} | 上下文来源: {session_context_source or '常规'}")
+        print(f"🧠 AI流式生成回复 | 模式: {model_mode} | 输入历史记录数量: {len(history)} | 上下文来源: {session_context_source or '常规'}")
         
         # 构建 prompt（复用相同逻辑）
         messages = []
@@ -363,19 +364,21 @@ class AICompletionPort:
     async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
                                              max_retries=3, timeout=60, session_context_source=None,
                                              on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None,
-                                             apply_enhancement: bool = False) -> AsyncGenerator[str, None]:
+                                             apply_enhancement: bool = False,
+                                             model_mode: str = "immersive") -> AsyncGenerator[str, None]:
         """
         带重试机制的流式生成AI回复
         
         Args:
             role_data: 角色配置数据
             history: 会话历史消息
-            user_input: 当前用户输入
+            user_input: 当前用户指令
             max_retries: 最大重试次数，默认3次
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
             on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅在成功的那次尝试触发一次）
             apply_enhancement: 是否在本方法中对最后一条用户消息做指令增强（默认 False）
+            model_mode: 模型等级/模式（immersive/story/fast）
             
         Yields:
             str: 每个流式回复片段
@@ -398,7 +401,7 @@ class AICompletionPort:
 
             try:
                 print(f"🔄 AI生成尝试 #{attempt + 1}/{total_attempts}")
-                print(f"🚀 本次尝试使用提供方: {provider} | 模型: {model_env}")
+                print(f"🚀 本次尝试使用提供方: {provider} | 模型: {model_env} | 模式: {model_mode}")
 
                 # 📊 T0: 记录 AI 调用次数
                 AI_PROVIDER_CALLS_TOTAL.labels(provider=provider, model=model_env or "unknown").inc()
@@ -423,7 +426,8 @@ class AICompletionPort:
                     caller=caller,
                     model_name=model_env,
                     on_used_instructions=_capture_used_instructions,
-                    apply_enhancement=apply_enhancement
+                    apply_enhancement=apply_enhancement,
+                    model_mode=model_mode
                 )
 
                 # 追踪累积字符数，以实现"前5个字符"的Latency记录（与 Bot 侧体验指标对齐）

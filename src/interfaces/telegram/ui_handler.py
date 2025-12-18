@@ -29,7 +29,7 @@ class UIHandler:
         keyboard = [
             [KeyboardButton("🎭 选择角色")],
             [KeyboardButton("🗂 历史聊天")],
-            [KeyboardButton("❓ 帮助")],
+            [KeyboardButton("⚙️ 设置"), KeyboardButton("❓ 帮助")],
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     

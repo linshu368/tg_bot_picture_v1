@@ -102,6 +102,15 @@ class StreamMessageService:
             
             self.logger.info(f"📊 用户 {user_id} 会话信息: session_id={session_id}, history_count={len(history)}")
             
+            # 获取用户模型偏好
+            model_mode = "immersive"
+            try:
+                from src.domain.services.session_service_base import session_service
+                if session_service and session_service.redis_store:
+                    model_mode = await session_service.redis_store.get_user_model_mode(user_id)
+            except Exception as e:
+                self.logger.debug(f"获取用户模型偏好失败: {e}")
+
             # 3. 执行精细化流式回复
             await self._execute_granular_stream_reply(
                 initial_msg=initial_msg,
@@ -112,7 +121,8 @@ class StreamMessageService:
                 session_id=session_id,
                 user_message_id=data.get("user_message_id", ""),
                 ui_handler=ui_handler,
-                start_time=start_time
+                start_time=start_time,
+                model_mode=model_mode
             )
             
             self.logger.info(f"✅ 用户 {user_id} 流式消息处理完成")
@@ -146,15 +156,9 @@ class StreamMessageService:
             raise
 
     async def _execute_granular_stream_reply(self, initial_msg, role_data, history, content, 
-                                           context_source, session_id, user_message_id, ui_handler, start_time=None):
+                                           context_source, session_id, user_message_id, ui_handler, start_time=None, model_mode="immersive"):
         """
         执行精细化的流式回复控制
-        
-        流式回复节奏：
-        1. 立即响应："✍️输入中..." (已完成)
-        2. 快速首段：收到前5个字符后立即显示
-        3. 定时更新：之后每2秒更新一次
-        4. 立即完成：生成完成后立即显示最终结果
         """
         from src.domain.services.ai_completion_port import ai_completion_port
         from src.domain.services.message_service import message_service
@@ -194,7 +198,8 @@ class StreamMessageService:
                 user_input=content,
                 session_context_source=context_source,
                 on_used_instructions=_on_used_instructions,
-                apply_enhancement=True
+                apply_enhancement=True,
+                model_mode=model_mode
             ):
                 # 对大块进行字符级分割处理
                 await self._process_chunk_with_granular_control(

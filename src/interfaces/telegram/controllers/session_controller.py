@@ -243,6 +243,14 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
     # 获取会话上下文来源（判断是否为快照会话）
     context_source = session.get("context_source") if session else None
     
+    # 获取用户模型偏好
+    model_mode = "immersive"
+    try:
+        if session_service.redis_store:
+             model_mode = await session_service.redis_store.get_user_model_mode(user_id)
+    except Exception as e:
+         logger.debug(f"获取用户模型偏好失败: {e}")
+
     try:
         # 使用流式生成并收集完整回复
         reply = ""
@@ -260,7 +268,8 @@ async def process_message(user_id: str, content: str, role_id: str = None) -> Di
             user_input=content,
             session_context_source=context_source,
             on_used_instructions=_on_used_instructions,
-            apply_enhancement=True
+            apply_enhancement=True,
+            model_mode=model_mode
         ):
             reply += chunk
             

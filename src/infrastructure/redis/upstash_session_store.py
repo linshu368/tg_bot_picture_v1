@@ -35,6 +35,9 @@ class UpstashSessionStore:
     def _key_session_data(self, session_id: str) -> str:
         return f"{self._ns}:data:{session_id}"
     
+    def _key_user_model_mode(self, user_id: str) -> str:
+        return f"{self._ns}:user_pref:{user_id}:model_mode"
+    
     def _key_last_session(self, user_id: str) -> str:
         return f"{self._ns}:last:{user_id}"
     
@@ -307,4 +310,26 @@ class UpstashSessionStore:
             logging.getLogger(__name__).info(f"set_session_data 写入: key={key}, role_id={rid}, keys={list(data.keys()) if isinstance(data, dict) else 'n/a'}")
         except Exception:
             pass
+
+    async def get_user_model_mode(self, user_id: str) -> str:
+        """获取用户模型模式偏好，默认为 'immersive'"""
+        key = self._key_user_model_mode(user_id)
+        try:
+            result = await self._cmd("GET", key)
+            val = self._decode_get_result(result)
+            if isinstance(val, dict):
+                val = val.get("value") or val.get("result")
+            if val in ["fast", "story", "immersive"]:
+                return val
+            return "immersive"
+        except Exception:
+            return "immersive"
+
+    async def set_user_model_mode(self, user_id: str, mode: str) -> None:
+        """设置用户模型模式偏好 ('immersive' or 'story' or 'fast')"""
+        if mode not in ["fast", "story", "immersive"]:
+            return
+        key = self._key_user_model_mode(user_id)
+        await self._cmd("SET", key, mode)
+        logging.getLogger(__name__).info(f"用户 {user_id} 模型模式已设置为: {mode}")
 

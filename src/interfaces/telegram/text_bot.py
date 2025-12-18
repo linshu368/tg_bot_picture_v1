@@ -422,6 +422,9 @@ class TextBot:
             elif content == "🗂 历史聊天":
                 await self._handle_history_list(update, context, user_id)
                 return
+            elif content == "⚙️ 设置":
+                await self._handle_settings(update, user_id)
+                return
             elif content == "💳 购买积分":
                 # 路由到 /buy 逻辑，最大化复用原有回调链
                 try:
@@ -489,6 +492,9 @@ class TextBot:
 • 点击“🎭 选择角色” 查看角色列表
 • 点击“🗂 历史聊天” 查看历史聊天记录
 
+⚙️ **设置**
+• 点击“⚙️ 设置” 可切换AI回复模式（快餐/剧情）
+
 🔄 **重新生成**
 • 对角色回复不满意？点击"🔄 重新生成"按钮
 
@@ -503,6 +509,30 @@ class TextBot:
 """
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
+
+    async def _handle_settings(self, update: Update, user_id: str) -> None:
+        """处理设置菜单"""
+        self.logger.info(f"⚙️ 设置菜单 user_id={user_id}")
+        
+        # 获取当前模式
+        current_mode = "immersive"
+        if self.session_service and self.session_service.redis_store:
+            current_mode = await self.session_service.redis_store.get_user_model_mode(user_id)
+        
+        mode_text = "🎦 沉浸模式 (默认)"
+        if current_mode == "fast":
+            mode_text = "🍔 快餐模式"
+        elif current_mode == "story":
+            mode_text = "📖 剧情模式"
+            
+        text = f"⚙️ **设置中心**\n\n当前模型模式：**{mode_text}**"
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🤖 模型选择", callback_data="settings_model_select")],
+            [InlineKeyboardButton("关闭设置", callback_data="close_settings")]
+        ])
+        
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode='Markdown')
     
     async def _handle_history_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: str) -> None:
         """历史聊天列表：以 deeplink 链接形式展示最近快照"""
