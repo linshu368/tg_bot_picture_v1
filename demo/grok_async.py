@@ -32,7 +32,7 @@ class AsyncGrokCaller:
             'messages': messages,
             'stream': True,  # 启用流式返回
             'model': model,   # 模型参数从外部传入
-            'temperature': 0.3  # 设置创造性参数
+            # 'temperature': 0.3  # 设置创造性参数
         }
 
         # 创建超时配置
@@ -121,7 +121,7 @@ class AsyncGrokCaller:
             'messages': messages,
             'stream': False,
             'model': model,  # 模型参数从外部传入
-            'temperature': 0.3  # 设置创造性参数
+            # 'temperature': 0.3  # 设置创造性参数
         }
 
         timeout_config = aiohttp.ClientTimeout(total=timeout)

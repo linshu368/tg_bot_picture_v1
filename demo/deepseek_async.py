@@ -35,7 +35,7 @@ class AsyncDeepseekCaller:
             'messages': messages,
             'stream': True,  # 启用流式返回
             'model': use_model,
-            'temperature': 1.3  # DeepSeek 建议 temperature (deepseek-chat 通用建议 1.3 左右，或根据具体需求调整)
+            # 'temperature': 1.3  # DeepSeek 建议 temperature (deepseek-chat 通用建议 1.3 左右，或根据具体需求调整)
         }
 
         # 创建超时配置

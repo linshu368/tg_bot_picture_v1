@@ -36,7 +36,7 @@ class AsyncGeminiCaller:
             'messages': messages,
             'stream': True,
             'model': use_model,
-            'temperature': 1.3
+            # 'temperature': 1.3
         }
 
         timeout_config = aiohttp.ClientTimeout(total=timeout)
