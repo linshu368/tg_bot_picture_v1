@@ -179,6 +179,7 @@ class StreamMessageService:
         accumulated_text_ref = [accumulated_text]
         phase_ref = [phase]
         last_update_time_ref = [last_update_time]
+        first_latency_ref = [None]  # 🆕 用于捕获首响耗时
         
         try:
             # 使用带重试机制的流式生成
@@ -210,7 +211,8 @@ class StreamMessageService:
                     regular_update_interval=regular_update_interval,
                     last_update_time_ref=last_update_time_ref,
                     initial_msg=initial_msg,
-                    start_time=start_time
+                    start_time=start_time,
+                    first_latency_ref=first_latency_ref
                 )
             
             # 从引用中获取最终值
@@ -287,6 +289,10 @@ class StreamMessageService:
                         # 🆕 新字段写入逻辑：完整响应耗时
                         full_response_latency = used_instructions_meta.get("full_response_latency")
                         
+                        # 🆕 新字段写入逻辑：首响耗时与尝试次数
+                        first_response_latency = first_latency_ref[0]
+                        attempt_count = used_instructions_meta.get("attempt_count", 1)
+                        
                         if system_instructions or ongoing_instructions:
                             # 获取session_id中的user_id和role_id
                             try:
@@ -308,9 +314,11 @@ class StreamMessageService:
                                             model_name=model_name,
                                             user_input=content,
                                             round=round_num,
-                                            full_response_latency=full_response_latency
+                                            full_response_latency=full_response_latency,
+                                            first_response_latency=first_response_latency,  # 🆕 传入首响耗时
+                                            retry_attempt=attempt_count                     # 🆕 传入尝试次数
                                         )
-                                        self.logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}, duration={full_response_latency}")
+                                        self.logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}, duration={full_response_latency}, first_latency={first_response_latency}, attempt={attempt_count}")
                             except Exception as inner_e:
                                 self.logger.error(f"❌ 获取会话信息失败: {inner_e}")
                     except Exception as e:
@@ -337,7 +345,7 @@ class StreamMessageService:
 
     async def _process_chunk_with_granular_control(self, chunk, accumulated_text_ref, phase_ref, 
                                                  first_chars_threshold, regular_update_interval, 
-                                                 last_update_time_ref, initial_msg, start_time=None):
+                                                 last_update_time_ref, initial_msg, start_time=None, first_latency_ref=None):
         """
         对大块进行字符级分割处理，实现精细化控制
         
@@ -345,6 +353,7 @@ class StreamMessageService:
             chunk: 从AI接收到的文本块
             accumulated_text_ref: 累积文本的引用列表
             phase_ref: 阶段标记的引用列表
+            first_latency_ref: 首响耗时引用列表
             其他参数: 控制参数
         """
         import time
@@ -369,7 +378,10 @@ class StreamMessageService:
                         
                         # ⏱️ T1: 记录首响耗时（用户体验）
                         if start_time:
-                            BOT_FIRST_RESPONSE_LATENCY.observe(time.time() - start_time)
+                            latency = time.time() - start_time
+                            BOT_FIRST_RESPONSE_LATENCY.observe(latency)
+                            if first_latency_ref is not None:
+                                first_latency_ref[0] = latency  # 🆕 记录首响值
                             
                         last_update_time = current_time
                         self.logger.info(f"📤 首段更新完成: {char_count} 字符")

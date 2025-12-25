@@ -41,7 +41,7 @@ class UpstashSessionStore:
     def _key_last_session(self, user_id: str) -> str:
         return f"{self._ns}:last:{user_id}"
     
-    # 限制每个会话的最多存储 轮数，避免 Token 超限和成本失控
+    # 限制每个会话的最多存储 消息条数，避免 Token 超限和成本失控
     MAX_HISTORY_ITEMS = int(os.getenv("MAX_HISTORY_ITEMS"))
 
     async def _cmd(self, *args: str) -> Any:

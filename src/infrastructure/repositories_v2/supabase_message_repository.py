@@ -29,7 +29,9 @@ class SupabaseMessageRepository:
                           model_name: Optional[str] = None,
                           user_input: Optional[str] = None,
                           round: Optional[int] = None,
-                          full_response_latency: Optional[float] = None) -> Optional[str]:
+                          full_response_latency: Optional[float] = None,
+                          first_response_latency: Optional[float] = None,
+                          attempt_count: Optional[int] = None) -> Optional[str]:
         """
         保存消息到Supabase
         
@@ -45,6 +47,8 @@ class SupabaseMessageRepository:
             user_input: 用户输入内容
             round: 对话轮次
             full_response_latency: 完整响应耗时（秒）
+            first_response_latency: 首响耗时（秒）
+            attempt_count: 尝试次数（第几次调用成功）
             
         Returns:
             消息记录的ID，失败返回None
@@ -109,6 +113,20 @@ class SupabaseMessageRepository:
                 except Exception as e:
                     self.logger.warning(f"⚠️ full_response_latency 转换整数失败: {full_response_latency}, error: {e}")
                     message_data["full_response"] = None
+            
+            # 🆕 新增字段：首响耗时（保留小数，存为 float）
+            if first_response_latency is not None:
+                try:
+                    message_data["first_response_latency"] = float(first_response_latency)
+                except Exception:
+                    self.logger.warning(f"⚠️ first_response_latency 转换失败: {first_response_latency}")
+
+            # 🆕 新增字段：尝试次数（整数）
+            if attempt_count is not None:
+                try:
+                    message_data["attempt_count"] = int(attempt_count)
+                except Exception:
+                    self.logger.warning(f"⚠️ attempt_count 转换失败: {attempt_count}")
             
             # 异步插入数据（使用线程池避免阻塞主线程）
             def _sync_insert():
@@ -272,7 +290,9 @@ class SupabaseMessageRepository:
                                                       model_name: Optional[str] = None,
                                                       user_input: Optional[str] = None,
                                                       round: Optional[int] = None,
-                                                      full_response_latency: Optional[float] = None) -> asyncio.Task:
+                                                      full_response_latency: Optional[float] = None,
+                                                      first_response_latency: Optional[float] = None,
+                                                      retry_attempt: Optional[int] = None) -> asyncio.Task:
         """
         异步保存用户消息（使用AI生成时的真实数据内容）
         
@@ -289,6 +309,8 @@ class SupabaseMessageRepository:
             user_input: 用户输入内容
             round: 对话轮次
             full_response_latency: 完整响应耗时（秒）
+            first_response_latency: 首响耗时（秒）
+            retry_attempt: 尝试次数（对应 attempt_count）
             
         Returns:
             asyncio.Task: 可以await的任务对象
@@ -307,7 +329,9 @@ class SupabaseMessageRepository:
                     model_name=model_name,
                     user_input=user_input,
                     round=round,
-                    full_response_latency=full_response_latency
+                    full_response_latency=full_response_latency,
+                    first_response_latency=first_response_latency,
+                    attempt_count=retry_attempt
                 )
                 
                 if result:

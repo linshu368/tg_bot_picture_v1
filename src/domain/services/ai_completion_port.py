@@ -473,6 +473,7 @@ class AICompletionPort:
                     used_meta_candidate.update(meta or {})
                     used_meta_candidate["provider"] = provider_display_name
                     used_meta_candidate["model"] = model_env
+                    used_meta_candidate["attempt_count"] = attempt + 1  # 🆕 记录这是第几次尝试
 
                 stream = self.generate_reply_stream(
                     role_data=role_data,
@@ -542,8 +543,6 @@ class AICompletionPort:
                     except Exception as _e:
                         print(f"⚠️ on_used_instructions (final) 回调执行失败: {_e}")
                 
-                # 🆕 结束标志：为了消除“消息未回完”的误解，统一添加结束符
-                yield "\n●"
                 return
 
             except Exception as e:
