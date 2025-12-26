@@ -41,8 +41,11 @@ class UpstashSessionStore:
     def _key_last_session(self, user_id: str) -> str:
         return f"{self._ns}:last:{user_id}"
     
-    # 限制每个会话的最多存储 消息条数，避免 Token 超限和成本失控
-    MAX_HISTORY_ITEMS = int(os.getenv("MAX_HISTORY_ITEMS"))
+    # 限制每个会话的最多存储 消息条数 (High Water Mark) - 达到此数量触发清理
+    MAX_HISTORY_ITEMS = int(os.getenv("MAX_HISTORY_ITEMS", "150"))
+    # 清理后保留的消息数量 (Low Water Mark) - 默认为 MAX_HISTORY_ITEMS (即每次都截断，保持原行为)
+    # 如果 .env 中未配置 HISTORY_RETENTION_COUNT，则默认行为与 MAX_HISTORY_ITEMS 一致
+    HISTORY_RETENTION_COUNT = int(os.getenv("HISTORY_RETENTION_COUNT", str(MAX_HISTORY_ITEMS)))
 
     async def _cmd(self, *args: str) -> Any:
         """
@@ -199,10 +202,12 @@ class UpstashSessionStore:
         await self._cmd("rpush", key, *values)
         
         # 强制截断：防止全量重写导致列表过长
-        try:
-            await self._cmd("ltrim", key, -self.MAX_HISTORY_ITEMS, -1)
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"set_messages ltrim 失败: {e}")
+        # 仅当超过高水位线 (MAX_HISTORY_ITEMS) 时，截断到保留数量 (HISTORY_RETENTION_COUNT)
+        if len(messages) > self.MAX_HISTORY_ITEMS:
+            try:
+                await self._cmd("ltrim", key, -self.HISTORY_RETENTION_COUNT, -1)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"set_messages ltrim 失败: {e}")
 
         # 等待一段时间，确保数据同步到 Redis
         # time.sleep(1)  # 等待 3 秒，确保数据完全写入
@@ -212,13 +217,22 @@ class UpstashSessionStore:
     async def append_message(self, session_id: str, message: Dict[str, Any]) -> None:
         """
         追加单条消息到会话（原子 RPUSH）；兼容旧存储会自动覆盖为 list
+        采用 High-Low Water Mark 策略：仅当超过 MAX_HISTORY_ITEMS 时，截断到 HISTORY_RETENTION_COUNT
         """
         key = self._key_messages(session_id)
         try:
             # 原子追加，避免“读-改-写”并发覆盖
-            await self._cmd("rpush", key, json.dumps(message, ensure_ascii=False))
-            # 自动滑动窗口：只保留最近 MAX_HISTORY_ITEMS 条
-            await self._cmd("ltrim", key, -self.MAX_HISTORY_ITEMS, -1)
+            resp = await self._cmd("rpush", key, json.dumps(message, ensure_ascii=False))
+            
+            # 获取最新长度 (Upstash RPUSH 返回当前长度)
+            current_len = 0
+            if isinstance(resp, dict):
+                current_len = resp.get("result") or resp.get("value") or 0
+            
+            # 只有当超过高水位线时才执行截断
+            if int(current_len) > self.MAX_HISTORY_ITEMS:
+                # 自动滑动窗口：保留最近 HISTORY_RETENTION_COUNT 条
+                await self._cmd("ltrim", key, -self.HISTORY_RETENTION_COUNT, -1)
         except Exception:
             # 可能是旧 KV/JSON 存储导致类型冲突：回退迁移
             try:
