@@ -36,6 +36,15 @@ class AsyncGeminiCaller:
             'messages': messages,
             'stream': True,
             'model': use_model,
+            'provider': {
+                "sort": "latency",
+                "ignore": [
+                    "wandb",
+                    "deepinfra",
+                    "sambanova",
+                    "siliconflow"
+                ]
+            },
             # 'temperature': 1.3
         }
 

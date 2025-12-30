@@ -78,7 +78,7 @@ class AsyncNovelCaller:
         print(f"[Novel API DEBUG] 发起请求到: {url}")
         print(f"[Novel API DEBUG] 使用模型: {model}")
         print(f"[Novel API DEBUG] 消息数量: {len(messages)}")
-        debug = True  # 强制开启debug
+        debug = False  # 强制开启debug
 
         timeout_cfg = aiohttp.ClientTimeout(total=timeout)
         async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
