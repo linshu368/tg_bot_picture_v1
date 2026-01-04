@@ -19,18 +19,31 @@ from src.infrastructure.monitoring.metrics import (
 @dataclass
 class CallProfile:
     """定义单次AI调用的配置规格"""
-    caller_attr: str       # 对应 self 中的实例属性名，如 'deepseek'
+    caller_attr: str       # 对应 self 中的实例属性名，如 'deepseek_1'
     model_env_key: str     # 模型名称的环境变量 Key
     timeout_env_key: str   # 首字超时时间的环境变量 Key
     provider_name: str     # 用于日志和监控显示的名称
     default_timeout: float = 3.0 # 默认超时时间
+    default_model: str = None    # 默认模型名称（当环境变量未设置时使用）
 
 class AICompletionPort:
-    def __init__(self, grok_caller: Optional[AsyncGrokCaller] = None, novel_caller: Optional[AsyncNovelCaller] = None, gemini_caller: Optional[AsyncGeminiCaller] = None, deepseek_caller: Optional[AsyncDeepseekCaller] = None):
+    def __init__(self, 
+                 grok_caller: Optional[AsyncGrokCaller] = None, 
+                 novel_caller: Optional[AsyncNovelCaller] = None, 
+                 gemini_caller: Optional[AsyncGeminiCaller] = None, 
+                 deepseek_caller_1: Optional[AsyncDeepseekCaller] = None,
+                 deepseek_caller_3: Optional[AsyncDeepseekCaller] = None):
+        
         self.grok = grok_caller
         self.novel = novel_caller
         self.gemini = gemini_caller
-        self.deepseek = deepseek_caller
+        # 兼容旧代码，如果只传了 deepseek_caller_1 但其他地方还在引用 self.deepseek
+        # 我们可以保留一个指向主实例的引用，或者逐步清理
+        self.deepseek_1 = deepseek_caller_1
+        self.deepseek_3 = deepseek_caller_3
+        # 保持对旧代码的兼容性 (如果仍有直接访问 self.deepseek 的情况)
+        self.deepseek = deepseek_caller_1
+
         # 前3轮对话的增强指令模板
         self.early_conversation_instruction = (
             "##系统指令：以下为最高优先级指令。\n"
@@ -50,20 +63,30 @@ class AICompletionPort:
         # 1. 原子能力库 (Profiles): 定义所有可用的原子调用方式
         # -------------------------------------------------------------------------
         self.profiles = {
-            # --- DeepSeek 策略 ---
+            # --- DeepSeek 策略 (v1/v2 使用 instance 1) ---
             "deepseek_v1": CallProfile(
-                caller_attr="deepseek",
+                caller_attr="deepseek_1",
                 model_env_key="DEEPSEEK_MODEL_1",
                 timeout_env_key="DEEPSEEK_1_FIRST_CHUNK_TIMEOUT",
                 provider_name="DeepSeek_V1",
                 default_timeout=3
             ),
             "deepseek_v2": CallProfile(
-                caller_attr="deepseek",
+                caller_attr="deepseek_1",
                 model_env_key="DEEPSEEK_MODEL_2",
                 timeout_env_key="DEEPSEEK_2_FIRST_CHUNK_TIMEOUT",
                 provider_name="DeepSeek_V2",
                 default_timeout=2.5
+            ),
+            
+            # --- DeepSeek 策略 (v3 使用 instance 3 - SiliconFlow) ---
+            "deepseek_v3": CallProfile(
+                caller_attr="deepseek_3",
+                model_env_key="DEEPSEEK_MODEL_3",
+                timeout_env_key="DEEPSEEK_3_FIRST_CHUNK_TIMEOUT",
+                provider_name="DeepSeek_V3",
+                default_timeout=3,
+                default_model="Pro/deepseek-ai/DeepSeek-V3.1-Terminus"
             ),
             
             # --- Gemini 策略 ---
@@ -102,8 +125,8 @@ class AICompletionPort:
             # story: Gemini (fast) -> Gemini (retry with longer timeout) -> Grok
             "story": ["gemini_v1", "gemini_v2", "grok_v1"],
             
-            # immersive: Gemini -> Gemini -> Grok
-            "immersive": ["deepseek_v1", "deepseek_v2", "grok_v1"]
+            # immersive: DeepSeek V3 (SiliconFlow) -> DeepSeek V2 (Official) -> Grok
+            "immersive": ["deepseek_v3", "deepseek_v2", "grok_v1"]
         }
 
         # AI流式生成 - 2. 中间卡顿熔断时长 (默认3.0秒)
@@ -448,6 +471,10 @@ class AICompletionPort:
 
             # 动态获取环境变量配置
             model_env = os.getenv(profile.model_env_key)
+            # 如果环境变量未设置，使用 profile 定义的默认值
+            if not model_env and profile.default_model:
+                model_env = profile.default_model
+                
             timeout_env_val = os.getenv(profile.timeout_env_key)
             try:
                 first_chunk_timeout = float(timeout_env_val) if timeout_env_val else profile.default_timeout
@@ -572,8 +599,8 @@ class AICompletionPort:
         选择一个默认可用的调用器：
         优先 DeepSeek，其次 Gemini，其次 Novel、Grok；如果都不存在则返回 None
         """
-        if self.deepseek:
-            return self.deepseek
+        if self.deepseek_1:
+            return self.deepseek_1
         if self.gemini:
             return self.gemini
         if self.novel:

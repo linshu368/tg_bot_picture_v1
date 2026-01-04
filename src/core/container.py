@@ -5,6 +5,7 @@
 
 from typing import Dict, Any, Type, TypeVar, Optional
 import logging
+import os
 
 T = TypeVar('T')
 
@@ -95,14 +96,6 @@ def setup_container(settings) -> Container:
         return SupabaseManager(c.get("settings").database)
     
     container.register_factory("supabase_manager", supabase_manager_factory)
-    
-    # # 注册 Point 组合仓库（MVP：JSON 实现）
-    # def point_composite_repository_factory(c):
-    #     from src.infrastructure.repositories_v2.point_repository_json import JSONPointRepository
-    #     # 可按需从 settings 中读取目录，默认 data/payments
-    #     return JSONPointRepository(base_dir="data/payments")
-    
-    # container.register_factory("point_composite_repository", point_composite_repository_factory)
     
     # 注册 Repository 层
     def role_repository_factory(c):
@@ -204,10 +197,23 @@ def setup_container(settings) -> Container:
         return AsyncGeminiCaller()
     container.register_factory("gemini_caller", gemini_caller_factory)
 
-    def deepseek_caller_factory(c):
+    # --- DeepSeek V1/V2 Instance (Official/Default) ---
+    def deepseek_caller_1_factory(c):
         from demo.deepseek_async import AsyncDeepseekCaller
-        return AsyncDeepseekCaller()
-    container.register_factory("deepseek_caller", deepseek_caller_factory)
+        # 优先读取 _1 变量，回退读取不带后缀的旧变量
+        api_key = os.getenv("DEEPSEEK_API_KEY_1") or os.getenv("DEEPSEEK_API_KEY")
+        api_url = os.getenv("DEEPSEEK_API_URL_1") or os.getenv("DEEPSEEK_API_URL")
+        return AsyncDeepseekCaller(api_key=api_key, api_url=api_url)
+    container.register_factory("deepseek_caller_1", deepseek_caller_1_factory)
+
+    # --- DeepSeek V3 Instance (SiliconFlow) ---
+    def deepseek_caller_3_factory(c):
+        from demo.deepseek_async import AsyncDeepseekCaller
+        # 优先读取 _3 变量，否则使用硬编码的 SiliconFlow 默认值
+        api_key = os.getenv("DEEPSEEK_API_KEY_3") or "sk-mztgmqtkmhfgbdgkgbejivwswyspwzjzuadgaracjwmzkegr"
+        api_url = os.getenv("DEEPSEEK_API_URL_3") or "https://api.siliconflow.cn/v1/chat/completions"
+        return AsyncDeepseekCaller(api_key=api_key, api_url=api_url)
+    container.register_factory("deepseek_caller_3", deepseek_caller_3_factory)
 
     def grok_caller_factory(c):
         from demo.grok_async import AsyncGrokCaller
@@ -226,41 +232,11 @@ def setup_container(settings) -> Container:
             gemini_caller=c.get("gemini_caller"),
             grok_caller=c.get("grok_caller"),
             novel_caller=c.get("novel_caller"),
-            deepseek_caller=c.get("deepseek_caller")
+            deepseek_caller_1=c.get("deepseek_caller_1"),
+            deepseek_caller_3=c.get("deepseek_caller_3")
         )
     
     container.register_factory("ai_completion_port", ai_completion_port_factory)
-    
-    # def payment_api_factory(c):
-    #     from src.infrastructure.external_apis.payment_api import PaymentAPI
-    #     return PaymentAPI()
-    
-    # container.register_factory("payment_api", payment_api_factory)
-    
-
-    # def payment_service_factory(c):
-    #     from src.domain.services.payment_service import PaymentService
-    #     service = PaymentService(
-    #         payment_config=c.get("settings").payment.__dict__ if hasattr(c.get("settings"), 'payment') else {},
-    #         payment_api=c.get("payment_api"),
-    #         point_composite_repo=c.get("point_composite_repository")
-    #     )
-    #     service.logger.info("🔧 PaymentService: 迁移完成 - 仅依赖PointCompositeRepository")
-    #     return service
-    
-    # container.register_factory("payment_service", payment_service_factory)
-
-    # # 注册支付回调处理器
-    # def payment_webhook_handler_factory(c):
-    #     from src.infrastructure.messaging.payment_webhook import PaymentWebhookHandler
-    #     return PaymentWebhookHandler(
-    #         c.get("payment_service"),
-    #         c.get("user_service"),
-    #         c.get("telegram_bot"),
-    #         c.get("payment_api")
-    #     )
-    
-    # container.register_factory("payment_webhook_handler", payment_webhook_handler_factory)
     
     # 返回配置好的容器
     return container
