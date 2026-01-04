@@ -85,7 +85,7 @@ class AICompletionPort:
                 model_env_key="DEEPSEEK_MODEL_3",
                 timeout_env_key="DEEPSEEK_3_FIRST_CHUNK_TIMEOUT",
                 provider_name="DeepSeek_V3",
-                default_timeout=3,
+                default_timeout=7,
                 default_model="Pro/deepseek-ai/DeepSeek-V3.1-Terminus"
             ),
             
