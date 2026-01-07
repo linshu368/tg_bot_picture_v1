@@ -261,7 +261,7 @@ class AICompletionPort:
         print(f"✨ 用户消息已增强({instruction_type}) | 原长度: {len(original_content)} | 增强后长度: {len(enhanced_content)}")
         return enhanced_content, instructions if instructions else None
 
-    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None, on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None, apply_enhancement: bool = False, model_mode: str = "immersive") -> AsyncGenerator[str, None]:
+    async def generate_reply_stream(self, role_data, history, user_input, timeout=60, session_context_source=None, caller: Optional[object] = None, model_name: Optional[str] = None, execution_context: Optional[Dict[str, Any]] = None, apply_enhancement: bool = False, model_mode: str = "immersive") -> AsyncGenerator[str, None]:
         """
         流式生成AI回复 - 返回异步生成器，用于Telegram Bot的流式更新
         
@@ -271,7 +271,7 @@ class AICompletionPort:
             user_input: 当前用户指令
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
-            on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅调用一次）
+            execution_context: 可选的上下文容器（字典），用于回传本次调用的元数据（指令、generation_id等）
             apply_enhancement: 是否在本方法中对最后一条用户消息做指令增强（默认 False）
             model_mode: 模型等级/模式（immersive/story/fast）
             
@@ -301,7 +301,9 @@ class AICompletionPort:
         
         # 🆕 4. 对话增强指令逻辑（流式版本）
         user_turn_count = self._count_real_user_turns(history)
-        used_meta: Dict[str, Any] = {
+        
+        # 本地元数据收集
+        local_meta: Dict[str, Any] = {
             "turn_count": user_turn_count,
             "instruction_type": None,
             "system_instructions": None,
@@ -321,10 +323,10 @@ class AICompletionPort:
                 )
                 if apply_enhancement:
                     messages[last_user_msg_index]["content"] = enhanced_content
-                used_meta["instruction_type"] = "system"
-                used_meta["system_instructions"] = used_instruction
+                local_meta["instruction_type"] = "system"
+                local_meta["system_instructions"] = used_instruction
                 # 🆕 新字段写入逻辑：记录本轮实际使用的指令（供上层存入 messages.instructions）
-                used_meta["instructions"] = used_instruction
+                local_meta["instructions"] = used_instruction
                 if apply_enhancement:
                     print(f"✅ 已为第{user_turn_count}轮对话添加系统增强指令（流式）")
         elif user_turn_count >= 4 and messages:
@@ -339,10 +341,10 @@ class AICompletionPort:
                 )
                 if apply_enhancement:
                     messages[last_user_msg_index]["content"] = enhanced_content
-                used_meta["instruction_type"] = "ongoing"
-                used_meta["ongoing_instructions"] = used_instruction
+                local_meta["instruction_type"] = "ongoing"
+                local_meta["ongoing_instructions"] = used_instruction
                 # 🆕 新字段写入逻辑：记录本轮实际使用的指令（供上层存入 messages.instructions）
-                used_meta["instructions"] = used_instruction
+                local_meta["instructions"] = used_instruction
                 if apply_enhancement:
                     print(f"✅ 已为第{user_turn_count}轮对话添加持续增强指令（流式）")
         
@@ -367,47 +369,48 @@ class AICompletionPort:
 
         # 🆕 新字段写入逻辑：补充回调元数据（模型名与本次调用的上下文载荷）
         try:
-            used_meta["model_name"] = model_name
+            local_meta["model_name"] = model_name
             # 100% 复现：记录本次实际投喂的完整 messages
-            used_meta["final_messages"] = list(messages)
-            used_meta["prompt_payload"] = {
+            local_meta["final_messages"] = list(messages)
+            local_meta["prompt_payload"] = {
                 "system_prompt": role_data.get("system_prompt") if isinstance(role_data, dict) else None,
                 "history": history_for_prompt,
                 "user_input": user_input,
-                "instructions": used_meta.get("instructions"),
-                "instruction_type": used_meta.get("instruction_type"),
+                "instructions": local_meta.get("instructions"),
+                "instruction_type": local_meta.get("instruction_type"),
                 # 兼容旧字段的同时，加入最终 messages
                 "final_messages": list(messages)
             }
         except Exception:
             pass
 
-        # 在开始流式之前，回调一次提供指令使用的元数据
-        if on_used_instructions and used_meta.get("instruction_type") is not None:
+        # 同步元数据到外部容器
+        if execution_context is not None:
             try:
-                on_used_instructions(dict(used_meta))
+                execution_context.update(local_meta)
             except Exception as _e:
-                print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
+                print(f"⚠️ 更新 execution_context 失败: {_e}")
 
         # 准备 OpenRouter 统计回调
         async def _on_generation_id(gen_id: str):
             # 记录 generation_id 到元数据中
             if gen_id:
                 print(f"🎟️ [Callback] 收到 generation_id: {gen_id}")
-                used_meta["generation_id"] = gen_id
+                local_meta["generation_id"] = gen_id
                 
                 # 尝试获取 API Key 以便后续查询
                 caller_api_key = getattr(use_caller, 'api_key', '') or ''
                 if caller_api_key:
-                    used_meta["api_key"] = caller_api_key
+                    local_meta["api_key"] = caller_api_key
                 
-                # ⚡️ 关键修正：获取到 ID 后，立即再次触发回调通知上层
-                # 这样上层才能拿到包含 generation_id 的最新元数据
-                if on_used_instructions:
+                # 同步到外部容器
+                if execution_context is not None:
                     try:
-                        on_used_instructions(dict(used_meta))
+                        execution_context["generation_id"] = gen_id
+                        if caller_api_key:
+                            execution_context["api_key"] = caller_api_key
                     except Exception as _e:
-                        print(f"⚠️ on_used_instructions (gen_id) 回调执行失败: {_e}")
+                        print(f"⚠️ 更新 execution_context (gen_id) 失败: {_e}")
 
         # 检查 get_stream_response 是否支持 on_generation_id 参数
         # 这里做一个简单的兼容性处理，如果支持就传
@@ -520,7 +523,7 @@ class AICompletionPort:
 
     async def generate_reply_stream_with_retry(self, role_data, history, user_input, 
                                              max_retries=3, timeout=60, session_context_source=None,
-                                             on_used_instructions: Optional[Callable[[Dict[str, Any]], None]] = None,
+                                             execution_context: Optional[Dict[str, Any]] = None,
                                              apply_enhancement: bool = False,
                                              model_mode: str = "immersive") -> AsyncGenerator[str, None]:
         """
@@ -533,7 +536,7 @@ class AICompletionPort:
             max_retries: 最大重试次数，默认3次
             timeout: 超时时间
             session_context_source: 会话上下文来源标记
-            on_used_instructions: 可选回调，携带本次调用实际使用的指令元数据（仅在成功的那次尝试触发一次）
+            execution_context: 可选的上下文容器（字典），用于回传本次调用的元数据
             apply_enhancement: 是否在本方法中对最后一条用户消息做指令增强（默认 False）
             model_mode: 模型等级/模式（immersive/story/fast）
             
@@ -586,14 +589,13 @@ class AICompletionPort:
                 # ⏱️ T1: 记录 AI 请求发起时间
                 ai_req_start = time.time()
 
-                used_meta_candidate: Dict[str, Any] = {}
-
-                def _capture_used_instructions(meta: Dict[str, Any]) -> None:
-                    used_meta_candidate.clear()
-                    used_meta_candidate.update(meta or {})
-                    used_meta_candidate["provider"] = provider_display_name
-                    used_meta_candidate["model"] = model_env
-                    used_meta_candidate["attempt_count"] = attempt + 1  # 🆕 记录这是第几次尝试
+                # 更新 execution_context 中的重试相关信息
+                if execution_context is not None:
+                    execution_context["provider"] = provider_display_name
+                    execution_context["model"] = model_env
+                    execution_context["attempt_count"] = attempt + 1
+                    # 每次重试时，建议清除可能存在的上一次的 generation_id
+                    execution_context.pop("generation_id", None)
 
                 stream = self.generate_reply_stream(
                     role_data=role_data,
@@ -603,7 +605,7 @@ class AICompletionPort:
                     session_context_source=session_context_source,
                     caller=caller,
                     model_name=model_env,
-                    on_used_instructions=_capture_used_instructions,
+                    execution_context=execution_context,
                     apply_enhancement=apply_enhancement,
                     model_mode=model_mode
                 )
@@ -627,19 +629,13 @@ class AICompletionPort:
                         # ⏱️ T1: 记录 AI "首响"(前5字符)耗时
                         latency = time.time() - ai_req_start
                         AI_FIRST_TOKEN_LATENCY.labels(provider=provider_display_name, model=model_env or "unknown").observe(latency)
-                        
-                        # 触发指令元数据回调（在首响达成时触发一次即可）
-                        if on_used_instructions and used_meta_candidate:
-                            try:
-                                on_used_instructions(dict(used_meta_candidate))
-                            except Exception as _e:
-                                print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
-                        
                         metric_recorded = True
                 
                 # 定义接收时长数据的回调
                 def _on_duration_calculated(duration: float):
-                    used_meta_candidate["full_response_latency"] = duration
+                    # 同步到外部容器
+                    if execution_context is not None:
+                        execution_context["full_response_latency"] = duration
                     print(f"⏱️ 完整生成耗时: {duration:.2f}s")
                 
                 # 使用全能包装器 _stream_managed 代替原有的逻辑
@@ -655,13 +651,6 @@ class AICompletionPort:
                     yield chunk
 
                 print(f"✅ AI生成成功（第{attempt + 1}次尝试，提供方: {provider_display_name}）")
-                
-                # 🆕 结束标志前，再次回调以透传最终时长
-                if on_used_instructions and used_meta_candidate:
-                    try:
-                        on_used_instructions(dict(used_meta_candidate))
-                    except Exception as _e:
-                        print(f"⚠️ on_used_instructions (final) 回调执行失败: {_e}")
                 
                 return
 

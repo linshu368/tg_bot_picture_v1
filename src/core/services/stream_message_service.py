@@ -184,21 +184,14 @@ class StreamMessageService:
         try:
             # 使用带重试机制的流式生成
             # 用于接收AI端回传的指令使用信息（避免使用全局共享状态）
-            used_instructions_meta = {}
-            def _on_used_instructions(meta: dict) -> None:
-                try:
-                    used_instructions_meta.clear()
-                    if isinstance(meta, dict):
-                        used_instructions_meta.update(meta)
-                except Exception as _e:
-                    self.logger.debug(f"on_used_instructions 回调处理失败: {_e}")
-
+            execution_context = {}
+            
             async for chunk in ai_completion_port.generate_reply_stream_with_retry(
                 role_data=role_data,
                 history=history,
                 user_input=content,
                 session_context_source=context_source,
-                on_used_instructions=_on_used_instructions,
+                execution_context=execution_context,
                 apply_enhancement=True,
                 model_mode=model_mode
             ):
@@ -240,11 +233,11 @@ class StreamMessageService:
                 # 🆕 AI生成完成后，使用回调传回的实际使用指令，重新保存用户消息（带指令）
                 if message_service.message_repository and hasattr(message_service, 'session_service'):
                     try:
-                        system_instructions = used_instructions_meta.get("system_instructions")
-                        ongoing_instructions = used_instructions_meta.get("ongoing_instructions")
+                        system_instructions = execution_context.get("system_instructions")
+                        ongoing_instructions = execution_context.get("ongoing_instructions")
                         # 🆕 新字段写入逻辑：确定本轮实际使用的 instructions（非简单拼接，按真实使用选择其一）
-                        instruction_type = used_instructions_meta.get("instruction_type")
-                        instructions = used_instructions_meta.get("instructions")
+                        instruction_type = execution_context.get("instruction_type")
+                        instructions = execution_context.get("instructions")
                         if instructions is None:
                             # 兼容旧回调，仅在未显式提供 instructions 时按类型选择
                             if instruction_type == "system":
@@ -256,11 +249,11 @@ class StreamMessageService:
                                 instructions = system_instructions or ongoing_instructions
                         
                         # 🆕 新字段写入逻辑：模型名称
-                        model_name = used_instructions_meta.get("model_name") or used_instructions_meta.get("model")
+                        model_name = execution_context.get("model_name") or execution_context.get("model")
                         
                         # 🆕 新字段写入逻辑：history（100%复现）
                         # 优先使用回调给到的 final_messages；否则按当前逻辑构造
-                        final_messages = used_instructions_meta.get("final_messages")
+                        final_messages = execution_context.get("final_messages")
                         if not isinstance(final_messages, list) or not final_messages:
                             # 构造尽量接近的 messages（兜底）
                             constructed = []
@@ -287,11 +280,11 @@ class StreamMessageService:
                             round_num = None
                         
                         # 🆕 新字段写入逻辑：完整响应耗时
-                        full_response_latency = used_instructions_meta.get("full_response_latency")
+                        full_response_latency = execution_context.get("full_response_latency")
                         
                         # 🆕 新字段写入逻辑：首响耗时与尝试次数
                         first_response_latency = first_latency_ref[0]
-                        attempt_count = used_instructions_meta.get("attempt_count", 1)
+                        attempt_count = execution_context.get("attempt_count", 1)
                         
                         if system_instructions or ongoing_instructions:
                             # 获取session_id中的user_id和role_id
@@ -323,8 +316,8 @@ class StreamMessageService:
                                 self.logger.error(f"❌ 获取会话信息失败: {inner_e}")
                         
                         # 🆕 OpenRouter 统计信息获取 (仅打印验证)
-                        generation_id = used_instructions_meta.get("generation_id")
-                        api_key = used_instructions_meta.get("api_key")
+                        generation_id = execution_context.get("generation_id")
+                        api_key = execution_context.get("api_key")
                         if generation_id and api_key:
                             import asyncio
                             self.logger.info(f"🎫 捕获到 OpenRouter generation_id: {generation_id}，启动后台查询任务...")
