@@ -395,7 +395,13 @@ class AICompletionPort:
         async def _on_generation_id(gen_id: str):
             # 记录 generation_id 到元数据中
             if gen_id:
-                print(f"🎟️ [Callback] 收到 generation_id: {gen_id}")
+                # 🛑 安全检查：确认是 OpenRouter 的 URL
+                caller_url = getattr(use_caller, 'url', '') or ''
+                if "openrouter.ai" not in caller_url:
+                    # 如果不是 OpenRouter，忽略这个 ID，避免后续查询报错
+                    return
+
+                print(f"🎟️ [Callback] 收到 OpenRouter generation_id: {gen_id}")
                 local_meta["generation_id"] = gen_id
                 
                 # 尝试获取 API Key 以便后续查询
