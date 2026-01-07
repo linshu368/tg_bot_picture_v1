@@ -315,13 +315,28 @@ class StreamMessageService:
                             except Exception as inner_e:
                                 self.logger.error(f"❌ 获取会话信息失败: {inner_e}")
                         
-                        # 🆕 OpenRouter 统计信息获取 (仅打印验证)
+                        # 🆕 OpenRouter 统计信息获取
                         generation_id = execution_context.get("generation_id")
                         api_key = execution_context.get("api_key")
                         if generation_id and api_key:
                             import asyncio
                             self.logger.info(f"🎫 捕获到 OpenRouter generation_id: {generation_id}，启动后台查询任务...")
-                            asyncio.create_task(ai_completion_port.fetch_openrouter_stats(generation_id, api_key))
+                            
+                            # 定义一个包装函数来执行获取和保存
+                            async def _fetch_and_save_stats():
+                                try:
+                                    stats = await ai_completion_port.fetch_openrouter_stats(generation_id, api_key)
+                                    if stats:
+                                        # 调用 MessageService 更新统计数据
+                                        success = await message_service.update_ai_usage_stats(session_id, generation_id, stats)
+                                        if success:
+                                            self.logger.info(f"✅ 成功更新会话 {session_id} 的 OpenRouter 统计数据")
+                                        else:
+                                            self.logger.warning(f"⚠️ 更新会话 {session_id} 的 OpenRouter 统计数据失败")
+                                except Exception as _e:
+                                    self.logger.error(f"❌ 后台获取/保存 OpenRouter 统计失败: {_e}")
+
+                            asyncio.create_task(_fetch_and_save_stats())
                             
                     except Exception as e:
                         self.logger.error(f"❌ 保存带指令的用户消息失败: {e}")

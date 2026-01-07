@@ -149,13 +149,13 @@ class AICompletionPort:
 
 
 
-    async def fetch_openrouter_stats(self, generation_id: str, api_key: str):
+    async def fetch_openrouter_stats(self, generation_id: str, api_key: str) -> Optional[Dict[str, Any]]:
         """
-        异步获取 OpenRouter 统计信息并打印 (临时调试用)
+        异步获取 OpenRouter 统计信息并返回
         支持多次重试，因为 OpenRouter 的统计数据可能不会在流式生成开始时立即就绪。
         """
         if not generation_id or not api_key:
-            return
+            return None
 
         url = f"https://openrouter.ai/api/v1/generation?id={generation_id}"
         headers = {
@@ -181,7 +181,7 @@ class AICompletionPort:
                             
                             # 漂亮的打印 JSON
                             print(f"📊 [OpenRouter Stats] 获取成功 (attempt {attempt+1}):\n{json.dumps(data, indent=2, ensure_ascii=False)}")
-                            return # 成功后直接退出
+                            return data # 成功后直接返回数据
                         elif response.status == 404:
                             # 404 表示暂时没生成，需要重试
                             if attempt < max_retries - 1:
@@ -196,14 +196,15 @@ class AICompletionPort:
                             # 其他错误，打印并退出，或者也重试？通常 401/400 没必要重试
                             text = await response.text()
                             print(f"⚠️ [OpenRouter Stats] 查询异常: {response.status} - {text}")
-                            return
+                            return None
             except Exception as e:
                 print(f"❌ [OpenRouter Stats] 发生异常: {e}")
                 # 异常情况下也稍微等等再重试
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2)
                 else:
-                    return
+                    return None
+        return None
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
         """Return a logging-safe preview of text, avoiding Unicode surrogate errors.

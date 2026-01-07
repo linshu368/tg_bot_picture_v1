@@ -376,6 +376,93 @@ class SupabaseMessageRepository:
             self.logger.error(f"❌ 获取会话用户轮数失败: {e}")
             return 0
 
+    async def update_message_usage(self, session_id: str, generation_id: str, usage_data: Dict[str, Any]) -> bool:
+        """
+        更新消息的AI使用统计数据
+        通过 session_id 找到最新的一条消息（或者通过 generation_id 如果之前存了的话，
+        但目前主要靠 session_id 找到最近的一条 bot 消息，或者我们在 save_message 时返回了 id，
+        但这里是异步回调，可能只知道 session_id）
+
+        更严谨的做法是：update_last_message_by_session_id
+        或者我们在 execution_context 里如果能拿到 message_id 就更好了，但 save_message 是在流式结束时调用的。
+        
+        Args:
+            session_id: 会话ID
+            generation_id: OpenRouter生成的ID (用于校验或存储)
+            usage_data: 统计数据字典
+            
+        Returns:
+            是否更新成功
+        """
+        try:
+            # 1. 获取该会话最新的一条消息 (且是 assistant/bot 发送的)
+            # 或者直接获取最新的一条消息（不论是谁，因为我们存的是 snapshot row，通常包含 bot_reply）
+            last_row = await self._get_last_round_row(session_id)
+            if not last_row:
+                self.logger.warning(f"⚠️ 更新统计失败: 未找到会话 {session_id} 的最新消息")
+                return False
+                
+            msg_id = last_row.get("id")
+            
+            # 2. 准备更新的数据
+            update_payload = {}
+            
+            # 映射字段 (OpenRouter API -> DB Columns)
+            # API: data.model -> DB: model (注意这里可能会覆盖之前的 model_name，视需求而定，OpenRouter返回的模型名可能更精确)
+            # 但用户指示的是：[model, generation_time, latency, ...] 写入 messages 表
+            
+            api_data = usage_data.get("data", {})
+            
+            # 字段映射表
+            # key: DB字段名, value: (API字段名, 类型转换函数)
+            field_map = {
+                "model": ("model", str),
+                "generation_time": ("generation_time", lambda x: float(x) / 1000.0 if x is not None else None), # ms -> s
+                "latency": ("latency", lambda x: float(x) / 1000.0 if x is not None else None), # ms -> s
+                "native_tokens_prompt": ("native_tokens_prompt", int),
+                "native_tokens_completion": ("native_tokens_completion", int),
+                "native_tokens_reasoning": ("native_tokens_reasoning", int),
+                "native_tokens_cached": ("native_tokens_cached", int),
+                "cache_discount": ("cache_discount", float),
+                "usage": ("usage", float),
+                "finish_reason": ("finish_reason", str),
+                "provider_name": ("provider_name", str),
+            }
+            
+            for db_col, (api_key, converter) in field_map.items():
+                val = api_data.get(api_key)
+                if val is not None:
+                    try:
+                        update_payload[db_col] = converter(val)
+                    except Exception as _e:
+                        self.logger.warning(f"字段 {db_col} 转换失败: val={val}, err={_e}")
+                        
+            if not update_payload:
+                self.logger.warning("⚠️ 没有有效的统计数据需要更新")
+                return False
+                
+            # 3. 执行更新
+            client = self.supabase_manager.get_client()
+            
+            def _sync_update():
+                return client.table(self.table_name)\
+                    .update(update_payload)\
+                    .eq("id", msg_id)\
+                    .execute()
+                    
+            result = await asyncio.to_thread(_sync_update)
+            
+            if result.data:
+                self.logger.info(f"✅ 成功更新 AI 使用统计: session_id={session_id}, msg_id={msg_id}, usage={update_payload.get('usage')}")
+                return True
+            else:
+                self.logger.warning(f"⚠️ 更新统计返回空数据: session_id={session_id}, msg_id={msg_id}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"❌ 更新消息统计数据失败: {e}")
+            return False
+
     async def _get_last_round_row(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取会话中最新一轮（最大 round）的行"""
         try:

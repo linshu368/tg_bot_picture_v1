@@ -138,6 +138,20 @@ class MessageService:
         except Exception as e:
             self.logger.error(f"❌ 异步保存消息到Supabase失败: {e}")
     
+    async def update_ai_usage_stats(self, session_id: str, generation_id: str, stats_data: Dict[str, Any]) -> bool:
+        """
+        更新 AI 使用统计数据 (OpenRouter)
+        """
+        if not self.message_repository:
+            return False
+            
+        # 仅当 Repository 支持该方法时调用
+        if hasattr(self.message_repository, "update_message_usage"):
+            return await self.message_repository.update_message_usage(session_id, generation_id, stats_data)
+        else:
+            self.logger.warning("⚠️ MessageRepository 不支持 update_message_usage 方法")
+            return False
+
     async def get_user_message_count(self, user_id: str) -> int:
         """
         获取用户历史发送消息数量（以 Supabase 为准；无仓储时返回 0）
