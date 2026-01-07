@@ -4,6 +4,8 @@ import random
 import os
 import copy
 import asyncio
+import aiohttp
+import json
 from typing import Optional, Callable, AsyncGenerator, Dict, Any, List
 from dataclasses import dataclass
 from demo.grok_async import AsyncGrokCaller
@@ -146,6 +148,62 @@ class AICompletionPort:
             self.stream_total_timeout = 15.0
 
 
+
+    async def fetch_openrouter_stats(self, generation_id: str, api_key: str):
+        """
+        异步获取 OpenRouter 统计信息并打印 (临时调试用)
+        支持多次重试，因为 OpenRouter 的统计数据可能不会在流式生成开始时立即就绪。
+        """
+        if not generation_id or not api_key:
+            return
+
+        url = f"https://openrouter.ai/api/v1/generation?id={generation_id}"
+        headers = {
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        # 初始等待，避开刚开始的空白期
+        await asyncio.sleep(5) 
+        
+        print(f"🔍 [OpenRouter Stats] 正在查询 generation_id: {generation_id}")
+        
+        max_retries = 5
+        base_delay = 3.0
+        
+        for attempt in range(max_retries):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            # 简单的检查，看是不是空数据或者占位符（如果需要的话）
+                            # 只要成功拿到 200，且包含 data，通常就可以了
+                            
+                            # 漂亮的打印 JSON
+                            print(f"📊 [OpenRouter Stats] 获取成功 (attempt {attempt+1}):\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+                            return # 成功后直接退出
+                        elif response.status == 404:
+                            # 404 表示暂时没生成，需要重试
+                            if attempt < max_retries - 1:
+                                delay = base_delay * (1.5 ** attempt) # 指数退避: 3, 4.5, 6.75, ...
+                                print(f"⏳ [OpenRouter Stats] 404 Not Found, 等待 {delay:.1f}s 后重试 ({attempt+1}/{max_retries})...")
+                                await asyncio.sleep(delay)
+                                continue
+                            else:
+                                text = await response.text()
+                                print(f"⚠️ [OpenRouter Stats] 最终查询失败: {response.status} - {text}")
+                        else:
+                            # 其他错误，打印并退出，或者也重试？通常 401/400 没必要重试
+                            text = await response.text()
+                            print(f"⚠️ [OpenRouter Stats] 查询异常: {response.status} - {text}")
+                            return
+            except Exception as e:
+                print(f"❌ [OpenRouter Stats] 发生异常: {e}")
+                # 异常情况下也稍微等等再重试
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+                else:
+                    return
 
     def _safe_for_logging(self, text: str, max_len: Optional[int] = None) -> str:
         """Return a logging-safe preview of text, avoiding Unicode surrogate errors.
@@ -331,7 +389,42 @@ class AICompletionPort:
             except Exception as _e:
                 print(f"⚠️ on_used_instructions 回调执行失败: {_e}")
 
-        async for partial_reply in use_caller.get_stream_response(messages, use_model, timeout=timeout):
+        # 准备 OpenRouter 统计回调
+        async def _on_generation_id(gen_id: str):
+            # 记录 generation_id 到元数据中
+            if gen_id:
+                print(f"🎟️ [Callback] 收到 generation_id: {gen_id}")
+                used_meta["generation_id"] = gen_id
+                
+                # 尝试获取 API Key 以便后续查询
+                caller_api_key = getattr(use_caller, 'api_key', '') or ''
+                if caller_api_key:
+                    used_meta["api_key"] = caller_api_key
+                
+                # ⚡️ 关键修正：获取到 ID 后，立即再次触发回调通知上层
+                # 这样上层才能拿到包含 generation_id 的最新元数据
+                if on_used_instructions:
+                    try:
+                        on_used_instructions(dict(used_meta))
+                    except Exception as _e:
+                        print(f"⚠️ on_used_instructions (gen_id) 回调执行失败: {_e}")
+
+        # 检查 get_stream_response 是否支持 on_generation_id 参数
+        # 这里做一个简单的兼容性处理，如果支持就传
+        import inspect
+        has_gen_id_param = False
+        try:
+             sig = inspect.signature(use_caller.get_stream_response)
+             if 'on_generation_id' in sig.parameters:
+                 has_gen_id_param = True
+        except Exception:
+             pass
+
+        stream_kwargs = {}
+        if has_gen_id_param:
+            stream_kwargs['on_generation_id'] = _on_generation_id
+
+        async for partial_reply in use_caller.get_stream_response(messages, use_model, timeout=timeout, **stream_kwargs):
             chunk_count += 1
             total_chars += len(partial_reply)
             safe_chunk_preview = self._safe_for_logging(partial_reply, 50)

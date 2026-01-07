@@ -19,7 +19,7 @@ class AsyncDeepseekCaller:
             'Content-Type': 'application/json'
         }
 
-    async def get_stream_response(self, messages, model=None, timeout=60, debug=False):
+    async def get_stream_response(self, messages, model=None, timeout=60, debug=False, on_generation_id=None):
         """
         调用 DeepSeek API 流式生成响应 (异步版本)
         """
@@ -72,6 +72,7 @@ class AsyncDeepseekCaller:
                 
                 first_byte_received = False
                 chunk_count = 0
+                generation_id_sent = False
                 
                 # 逐块读取流式数据 (OpenAI/DeepSeek 流式响应格式)
                 async for line in response.content:
@@ -97,6 +98,17 @@ class AsyncDeepseekCaller:
                         
                         try:
                             chunk_json = json.loads(data_str)
+                            
+                            # 尝试提取 generation_id (OpenRouter 特有)
+                            if on_generation_id and not generation_id_sent:
+                                gen_id = chunk_json.get('id')
+                                if gen_id:
+                                    if asyncio.iscoroutinefunction(on_generation_id):
+                                        await on_generation_id(gen_id)
+                                    else:
+                                        on_generation_id(gen_id)
+                                    generation_id_sent = True
+                            
                             choices = chunk_json.get('choices', [])
                             
                             if not choices:

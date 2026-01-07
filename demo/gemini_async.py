@@ -20,7 +20,7 @@ class AsyncGeminiCaller:
             'Content-Type': 'application/json'
         }
 
-    async def get_stream_response(self, messages, model=None, timeout=60, debug=False):
+    async def get_stream_response(self, messages, model=None, timeout=60, debug=False, on_generation_id=None):
         """
         调用 Gemini API 流式生成响应 (异步版本)
         """
@@ -74,6 +74,7 @@ class AsyncGeminiCaller:
 
                 first_byte_received = False
                 chunk_count = 0
+                generation_id_sent = False
 
                 # 按 OpenAI / DeepSeek 风格解析 SSE 流
                 async for line in response.content:
@@ -96,6 +97,17 @@ class AsyncGeminiCaller:
 
                         try:
                             chunk_json = json.loads(data_str)
+                            
+                            # 尝试提取 generation_id (OpenRouter 特有)
+                            if on_generation_id and not generation_id_sent:
+                                gen_id = chunk_json.get('id')
+                                if gen_id:
+                                    if asyncio.iscoroutinefunction(on_generation_id):
+                                        await on_generation_id(gen_id)
+                                    else:
+                                        on_generation_id(gen_id)
+                                    generation_id_sent = True
+                            
                             choices = chunk_json.get('choices', [])
 
                             if not choices:

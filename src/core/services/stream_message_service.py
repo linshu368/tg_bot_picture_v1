@@ -321,6 +321,15 @@ class StreamMessageService:
                                         self.logger.info(f"🔄 已异步保存带指令的用户消息: session_id={session_id}, duration={full_response_latency}, first_latency={first_response_latency}, attempt={attempt_count}")
                             except Exception as inner_e:
                                 self.logger.error(f"❌ 获取会话信息失败: {inner_e}")
+                        
+                        # 🆕 OpenRouter 统计信息获取 (仅打印验证)
+                        generation_id = used_instructions_meta.get("generation_id")
+                        api_key = used_instructions_meta.get("api_key")
+                        if generation_id and api_key:
+                            import asyncio
+                            self.logger.info(f"🎫 捕获到 OpenRouter generation_id: {generation_id}，启动后台查询任务...")
+                            asyncio.create_task(ai_completion_port.fetch_openrouter_stats(generation_id, api_key))
+                            
                     except Exception as e:
                         self.logger.error(f"❌ 保存带指令的用户消息失败: {e}")
             else:
